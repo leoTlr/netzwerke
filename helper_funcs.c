@@ -1,5 +1,6 @@
 #include <stdio.h> // stderr, stdin
 #include <errno.h> // errno
+#include <stdlib.h>
 
 // Called with wrong arguments.
 void usage(char *argv0){
