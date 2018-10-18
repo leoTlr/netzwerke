@@ -12,12 +12,6 @@
 const size_t BUFLEN = 128;
 int sockfd = -1;
 
-// Called with wrong arguments.
-void usage( char *argv0 ){
-	printf( "usage : %s server-ip portnumber\n", argv0);
-	exit(EXIT_SUCCESS);
-}
-
 // ensure closing socket when recieving SIGINT
 void SIGINThandler(int signr){
 	// WARNING: requires initialized global server_sockfd; probably not threadsafe

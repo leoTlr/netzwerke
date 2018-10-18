@@ -32,10 +32,29 @@ CVector* started_threads;
 int server_sockfd = -1, client_sockfd;
 volatile sig_atomic_t exit_requested = 0;
 
-// Called with wrong arguments.
-void usage(char *argv0){
-	printf("usage : %s portnumber\n", argv0);
-	exit(EXIT_SUCCESS);
+// ensure closing socket when recieving SIGINT
+static void sighandler(int signo){
+	// pthread_exit should invoke the exit-handler of the threads
+	// TODO only use signal-safe functions
+
+	switch (signo){
+		case SIGINT:
+			printf("\nSIGINT recieved. Closing sockets\n");
+			close(server_sockfd);
+			for (int i=0; i < CVector_length(started_threads); i++){
+				pthread_exit(CVector_get(started_threads, i));
+				printf("thread closed\n");
+			}
+			printf("exiting\n");
+			exit(EXIT_SUCCESS);
+			break;
+		case SIGTERM:
+			printf("\nSIGTERM recieved. Closing server socket: ");
+			try_close(server_sockfd);
+			exit(EXIT_FAILURE);
+		default:
+			break;
+	}
 }
 
 int main(int argc, char **argv){
@@ -168,29 +187,4 @@ static void thread_exithandler(void * th_args) {
 	thread_args_t *args = (thread_args_t *) th_args;
 	printf("client %d: ", args->clientnr);
 	try_close(args->connfd);
-}
-
-// ensure closing socket when recieving SIGINT
-static void sighandler(int signo){
-	// pthread_exit should invoke the exit-handler of the threads
-	// TODO only use signal-safe functions
-
-	switch (signo){
-		case SIGINT:
-			printf("\nSIGINT recieved. Closing sockets\n");
-			close(server_sockfd);
-			for (int i=0; i < CVector_length(started_threads); i++){
-				pthread_exit(CVector_get(started_threads, i));
-				printf("thread closed\n");
-			}
-			printf("exiting\n");
-			exit(EXIT_SUCCESS);
-			break;
-		case SIGTERM:
-			printf("\nSIGTERM recieved. Closing server socket: ");
-			try_close(server_sockfd);
-			exit(EXIT_FAILURE);
-		default:
-			break;
-	}
 }

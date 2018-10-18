@@ -1,5 +1,11 @@
 #include <stdio.h> // stderr, stdin
-#include <errno.h> // errno"
+#include <errno.h> // errno
+
+// Called with wrong arguments.
+void usage(char *argv0){
+	printf("usage : %s portnumber\n", argv0);
+	exit(EXIT_SUCCESS);
+}
 
 // verbosely try to close socket
 void try_close(int sockfd){
