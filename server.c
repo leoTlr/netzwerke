@@ -162,7 +162,7 @@ static void connection_thread(void * th_args) {
 	thread_args_t* args = (thread_args_t*)malloc(sizeof(thread_args_t));
 	memcpy(args, (thread_args_t*) th_args, sizeof(thread_args_t));
 
-	int msg_len = 0;
+	int recvBUFlen = 0;
 
 	// initialize buffer
 	char recvBUF[BUFSIZE];
@@ -175,8 +175,8 @@ static void connection_thread(void * th_args) {
 	while (!exit_requested) {
 		
 		// use MSG_DONTWAIT to prevent blocking on this call (sets EAGAIN or EWOULDBLOCK if no data)
-		msg_len = recvfrom(args->connfd, &recvBUF, BUFSIZE-1, MSG_DONTWAIT, (struct sockaddr *) &args->client_addr, &args->addrlen);
-		if (msg_len < 0){
+		recvBUFlen = recvfrom(args->connfd, &recvBUF, BUFSIZE-1, MSG_DONTWAIT, (struct sockaddr *) &args->client_addr, &args->addrlen);
+		if (recvBUFlen < 0){
 			if (errno == EAGAIN || errno == EWOULDBLOCK){
 				// in case of non-blocking socket and no data arrived -> sleep and loop again
 				// this is needed so that the thread checks exit_requested without blocking on recvfrom
@@ -188,15 +188,24 @@ static void connection_thread(void * th_args) {
 			}
 		}
 		
-		if (msg_len == 0){
+		if (recvBUFlen == 0){
 			printf("Closing connection to client %d (%s)\n", args->clientnr, inet_ntoa(args->client_addr.sin_addr));
 			break;
 		}
 
-		recvBUF[msg_len] = '\0'; // cut string to proper length
+		recvBUF[recvBUFlen] = '\0'; // cut string to proper length
 
 		// Write data to stdout
 		printf("client %d (%s): %s\n", args->clientnr, inet_ntoa(args->client_addr.sin_addr), recvBUF);
+
+		// send back recieved data
+		if (sendto(args->connfd, &recvBUF, strlen(recvBUF), 0, (struct sockaddr *) &args->client_addr, args->addrlen) < 0){
+			if (errno == ECONNRESET){
+				printf("client %d (%s) reset connection\n", args->clientnr, inet_ntoa(args->client_addr.sin_addr));
+			} else {
+				sys_warn("Server Fault : SENDTO");
+			}
+		}
 
 		memset(recvBUF, 0, BUFSIZE-1); // reset recieve buffer and continue
 	}

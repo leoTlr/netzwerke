@@ -57,30 +57,43 @@ int main(int argc, char **argv){
 	}
 
 	// allocate BUFLEN bytes as read-buffer
-	char* line = (char*)malloc(BUFLEN);
+	char* msg = (char*)malloc(BUFLEN);
 	size_t len = 0;
 	ssize_t nread = 0;
 	// strncmp only comares the first strlen(ENDMSG) bytes
-	while (strncmp(line, ENDMSG, strlen(ENDMSG)) != 0){
+	while (1){
 
 		// reset buffer
-		memset(line, 0, BUFLEN-1);
+		memset(msg, 0, BUFLEN-1);
 
-		// read one line into buffer
+		// read one msg into buffer
 		printf("Enter String (type quit to end): ");
-		nread = getline(&line, &len, stdin);
-		
-		// substitute \n at the end of the line with \0 to make string finish there
+		nread = getline(&msg, &len, stdin);
+
+		// substitute \n at the end of the msg with \0 to make string finish there
 		// buffer still bigger but we only use the actual chars
-		line[nread-1] = '\0';
-				
-		// send line with connected socket
-		printf("Sending     : %s\n", line);
-		if (sendto(sockfd, line, strlen(line), 0, (struct sockaddr *) &serv_addr, addrLen) == -1){
+		msg[nread-1] = '\0';
+
+		if (strncmp(msg, ENDMSG, strlen(ENDMSG)) == 0) break;
+	
+		// send msg with connected socket
+		printf("Sending        : %s\n", msg);
+		if (sendto(sockfd, msg, strlen(msg), 0, (struct sockaddr *) &serv_addr, addrLen) == -1){
 			sys_err( "Client Fault: SENDTO", -4, sockfd);
 		}
+
+		// wait for answer and print it
+		printf("Listening...\n");
+		char recieved_msg[BUFLEN];
+		int recv_msglen = 0;
+		if ((recv_msglen = recvfrom(sockfd, &recieved_msg, sizeof(recieved_msg), 0, (struct sockaddr *) &serv_addr, &addrLen)) < 0){
+			sys_err("Client Fault : RECVFROM", -5, sockfd);
+		}
+		recieved_msg[recv_msglen] = '\0';
+		printf("Server answered: %s\n", recieved_msg);
 	}
 
+	free(msg);
 	try_close(sockfd);
 	return EXIT_SUCCESS;
 }
