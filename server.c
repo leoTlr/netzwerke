@@ -8,11 +8,10 @@
 #include <time.h>
 
 #include "helper_funcs.c"
-#include "vector.c"
 
-#define MAX_CONNECTIONS 10
+#define MAX_CONNECTIONS 1
 #define MAX_THREADS MAX_CONNECTIONS
-#define LISTEN_BACKLOG 10 // max connection queue length (see man listen)
+#define LISTEN_BACKLOG 100 // max connection queue length (see man listen)
 #define BUFSIZE 256
 
 typedef struct {
@@ -29,10 +28,8 @@ static void thread_exithandler(void *);
 // global vars needed for signalhandler
 int server_sockfd = -1, client_sockfd;
 volatile sig_atomic_t exit_requested = 0; // volatile sig_atomic_t to prevent concurrent access
+volatile sig_atomic_t thread_counter = 0; // to keep track of # running threads
 struct sigaction sa;
-
-// not really needed atm
-CVector* started_threads;
 
 // let program finish normally when recieving SIGINT
 static void sighandler(){
@@ -53,12 +50,6 @@ static void sighandler(){
 
 int main(int argc, char **argv){
 
-	// prepare thread vector
-	started_threads = malloc(sizeof(CVector));
-	CVector_init(started_threads);
-	if (started_threads == NULL){
-		sys_err("CVector_init", 2, server_sockfd);
-	}
 	pthread_t* tidBUF = malloc(sizeof(pthread_t));
 
 	// other declarations
@@ -88,12 +79,12 @@ int main(int argc, char **argv){
 	memset(&server_addr, 0, addrlen);
 	server_addr.sin_addr.s_addr = htonl(INADDR_ANY); // INADDR_ANY = 0 (ipv4 0.0.0.0)
 	server_addr.sin_family      = AF_INET; // ipv4 socket
-	server_addr.sin_port        = htons((u_short)atoi(argv[1]));
+	server_addr.sin_port        = htons((uint16_t)atoi(argv[1]));
 
 	// struct for client conection
 	memset(&client_addr, 0, addrlen);
 	client_addr.sin_family 	= AF_INET;
-	client_addr.sin_port	= htons((u_short)atoi(argv[1]));
+	client_addr.sin_port	= htons((uint16_t)atoi(argv[1]));
 
 	// set socket to be able to reuse address even if program exited abnormally
 	// otherwise exiting with SIGINT can cause problems on bind at the next start of the program
@@ -108,10 +99,11 @@ int main(int argc, char **argv){
 		sys_err("Server Fault : LISTEN", -3, server_sockfd);
 	}
 
-	printf("waiting for incoming connections...\n");
+	printf("Waiting for incoming connections...\n");
 	while (!exit_requested) {
 
-		if (CVector_length(started_threads) >= MAX_THREADS){
+		// wait with accepting connections if too many active
+		if (thread_counter >= MAX_THREADS){
 			usleep(200);
 			continue;
 		}
@@ -126,23 +118,14 @@ int main(int argc, char **argv){
 		}
 
 		// prepare args and create separate thread to handle connection
-		const thread_args_t th_args = {client_sockfd, client_id_counter, client_addr, addrlen};
+		const thread_args_t th_args = {client_sockfd, client_id_counter++, client_addr, addrlen};
 		pthread_create(tidBUF, NULL, (void *) &connection_thread, (void *) &th_args);
-		
-		// append tid to started_threads vector
-		CVector_append(started_threads, tidBUF);
-		client_id_counter++;
+		thread_counter++;		
 	}
 
 	// cleanup -----------------------------------------------
+	printf("Shutting down... ");
 	close(server_sockfd);
-
-	// wait for all threads to end normally
-	for (int i = 0; i < CVector_length(started_threads); i++){
-		tidBUF = CVector_get(started_threads, i);
-		pthread_join(*tidBUF, NULL);
-	}
-	CVector_free(started_threads);
 	free(tidBUF);
 
 	// unblock SIGINT
@@ -189,7 +172,7 @@ static void connection_thread(void * th_args) {
 		}
 		
 		if (recvBUFlen == 0){
-			printf("Closing connection to client %d (%s)\n", args->clientnr, inet_ntoa(args->client_addr.sin_addr));
+			printf("client %d (%s) closed connection\n", args->clientnr, inet_ntoa(args->client_addr.sin_addr));
 			break;
 		}
 
@@ -216,8 +199,12 @@ static void connection_thread(void * th_args) {
 }
 
 static void thread_exithandler(void * th_args) {
-	// close socket on exit
+	// close socket and decrement thread counter
 	thread_args_t *args = (thread_args_t *) th_args;
-	printf("client %d: ", args->clientnr);
-	try_close(args->connfd);
+	thread_counter--;
+	if (close(args->connfd) < 0){
+		char buf[50];
+		snprintf(buf, sizeof(buf), "close (tid %ld)", pthread_self());
+		sys_warn(buf);
+	}
 }
