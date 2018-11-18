@@ -46,7 +46,7 @@ int check_http_request(char* lineBUF, char** pathBUF, size_t pathBUFsize, char**
     else return flags | UNSUPPORTED_VERSION;
 }
 
-void print_client_msgtype(const int request_flags, const char* path ,const int client_nr, const char* addr_str){
+void print_client_msgtype(const int request_flags, const char* path, const int client_nr, const char* addr_str){
     if (request_flags < 0){
 		printf("client %d (%s): error parsing request\n", client_nr, addr_str);
     }
@@ -57,9 +57,9 @@ void print_client_msgtype(const int request_flags, const char* path ,const int c
 		printf("client %d (%s): GET %s\n", client_nr, addr_str, path);
     }
     else if (request_flags & HTTP_POST){
-        printf("client %d (%s): POST\n", client_nr, addr_str);
+        printf("client %d (%s): POST %s\n", client_nr, addr_str, path);
     }
     else if (request_flags & HTTP_HEAD){
-        printf("client %d (%s): HEAD\n", client_nr, addr_str);
+        printf("client %d (%s): HEAD %s\n", client_nr, addr_str, path);
     }
 }
