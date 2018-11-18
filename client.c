@@ -20,7 +20,7 @@ void SIGINThandler(int signr){
 	if (!(signr == SIGINT)) return; // only react on SIGINT
 
 	printf("\nSIGINT recieved. ");
-	try_close(sockfd);
+	try_close(sockfd, 0);
 
 	exit(EXIT_FAILURE);
 }
@@ -94,6 +94,6 @@ int main(int argc, char **argv){
 	}
 
 	free(msg);
-	try_close(sockfd);
+	try_close(sockfd, 0);
 	return EXIT_SUCCESS;
 }

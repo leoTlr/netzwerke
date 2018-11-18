@@ -1,6 +1,8 @@
 #include <stdio.h> // stderr, stdin
 #include <errno.h> // errno
 #include <stdlib.h>
+#include <unistd.h> // close()
+#include <string.h> // strerror()
 
 // Called with wrong arguments.
 void usage(char *argv0){
@@ -28,7 +30,7 @@ void sys_err(char *msg, int exitCode, int sockfd){
 	fprintf(stderr, "%s\n\t%s\n", msg, strerror(errno));
 
 	// close socket if existing
-	try_close(sockfd, 0);
+	close(sockfd);
 	
 	exit(exitCode);
 }

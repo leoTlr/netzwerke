@@ -8,13 +8,15 @@
 #include <time.h>
 
 #include "helper_funcs.c"
+#include "http_funcs.c"
 
-#define MAX_CONNECTIONS 1
+#define MAX_CONNECTIONS 10
 #define MAX_THREADS MAX_CONNECTIONS
 #define LISTEN_BACKLOG 100 // max connection queue length (see man listen)
-#define BUFSIZE 256
+#define BUFSIZE 2048
+#define REQUEST_PATH_BUFSIZE 64 // size in chars of requested path buffer
 
-typedef struct {
+typedef struct thread_args_t {
 	int connfd;
 	int clientnr;
 	struct sockaddr_in client_addr;
@@ -145,11 +147,16 @@ static void connection_thread(void * th_args) {
 	thread_args_t* args = (thread_args_t*)malloc(sizeof(thread_args_t));
 	memcpy(args, (thread_args_t*) th_args, sizeof(thread_args_t));
 
-	int recvBUFlen = 0;
-
-	// initialize buffer
+	// initialize buffers and variables needed
 	char recvBUF[BUFSIZE];
 	memset(recvBUF, 0, BUFSIZE);
+	int recvBUFlen = 0;
+
+	char* lineBUF, *saveptr1, *saveptr2; // saveptrs needed for strtok_r;
+	const char delimeter[3] = "\r\n"; // each line of request ends with carriage return + line feed
+	char* pathBUF = (char*)malloc(REQUEST_PATH_BUFSIZE*sizeof(char)); // path inside GET request
+	memset(pathBUF, 0, sizeof(*pathBUF));
+	int request_flags = 0;
 
 	// setup exit-handler
 	pthread_cleanup_push((void *) &thread_exithandler, (void *) args);
@@ -170,27 +177,31 @@ static void connection_thread(void * th_args) {
 				pthread_exit((void *) pthread_self());
 			}
 		}
-		
+
 		if (recvBUFlen == 0){
-			printf("client %d (%s) closed connection\n", args->clientnr, inet_ntoa(args->client_addr.sin_addr));
+			printf("client %d (%s): closed connection\n", args->clientnr, inet_ntoa(args->client_addr.sin_addr));
 			break;
 		}
 
-		recvBUF[recvBUFlen] = '\0'; // cut string to proper length
+		// parse first line of request
+		// strtok_r because we parse whole lines and tokenize again inside each line -> operating on same buffer
+		lineBUF = strtok_r(recvBUF, delimeter, &saveptr1);
+		request_flags = check_http_request(lineBUF, &pathBUF, REQUEST_PATH_BUFSIZE, &saveptr2);
 
-		// Write data to stdout
-		printf("client %d (%s): %s\n", args->clientnr, inet_ntoa(args->client_addr.sin_addr), recvBUF);
+		// print sth like: "client 1: GET requested-path"
+		print_client_msgtype(request_flags, pathBUF, args->clientnr, inet_ntoa(args->client_addr.sin_addr));
 
-		// send back recieved data
-		if (sendto(args->connfd, &recvBUF, strlen(recvBUF), 0, (struct sockaddr *) &args->client_addr, args->addrlen) < 0){
-			if (errno == ECONNRESET){
-				printf("client %d (%s) reset connection\n", args->clientnr, inet_ntoa(args->client_addr.sin_addr));
-			} else {
-				sys_warn("Server Fault : SENDTO");
-			}
+		// if no valid http request drop packet buffer and continue;
+		if (request_flags < 1 || request_flags & BAD_REQUEST) continue;
+
+		while (1){ // parse the other lines until (and not including) line of only \r\n
+			memset(lineBUF, 0, sizeof(*lineBUF));
+			if ((lineBUF = strtok_r(NULL, delimeter, &saveptr1)) == NULL) break;
+			//printf("%s\n", lineBUF);
 		}
-
-		memset(recvBUF, 0, BUFSIZE-1); // reset recieve buffer and continue
+		// reset recieve buffer and continue
+		memset(pathBUF, 0, REQUEST_PATH_BUFSIZE);
+		memset(recvBUF, 0, BUFSIZE-1); 
 	}
 
 	// remove exit_handler (and run it)
