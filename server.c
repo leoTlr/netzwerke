@@ -192,7 +192,7 @@ static void connection_thread(void * th_args) {
 		print_client_msgtype(request_flags, pathBUF, args->clientnr, inet_ntoa(args->client_addr.sin_addr));
 
 		// if no valid http request drop packet buffer and continue;
-		if (request_flags < 1 || request_flags & BAD_REQUEST) continue;
+		if (request_flags < 1 || request_flags & INVALID_REQUEST) continue;
 
 		while (1){ // parse the other lines until (and not including) line of only \r\n
 			memset(lineBUF, 0, sizeof(*lineBUF));
