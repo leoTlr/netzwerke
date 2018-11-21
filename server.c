@@ -14,7 +14,6 @@
 #define MAX_THREADS MAX_CONNECTIONS
 #define LISTEN_BACKLOG 100 // max connection queue length (see man listen)
 #define BUFSIZE 2048
-#define REQUEST_PATH_BUFSIZE 64 // size in chars of requested path buffer
 
 typedef struct thread_args_t {
 	int connfd;
@@ -33,8 +32,8 @@ volatile sig_atomic_t exit_requested = 0; // volatile sig_atomic_t to prevent co
 volatile sig_atomic_t thread_counter = 0; // to keep track of # running threads
 struct sigaction sa;
 
-// let program finish normally when recieving SIGINT
-static void sighandler(){
+// let program finish normally if recieving SIGINT
+void sighandler(){
 
 	// block SIGINT during cleanup
 	struct sigaction new_sa;
@@ -154,9 +153,9 @@ static void connection_thread(void * th_args) {
 
 	char* lineBUF, *saveptr1, *saveptr2; // saveptrs needed for strtok_r;
 	const char delimeter[3] = "\r\n"; // each line of request ends with carriage return + line feed
-	char* pathBUF = (char*)malloc(REQUEST_PATH_BUFSIZE*sizeof(char)); // path inside GET request
-	memset(pathBUF, 0, sizeof(*pathBUF));
-	int request_flags = 0;
+	
+	char* pathptr; // path in request
+	int request_flags = 0; // flags set during check_http_request()
 
 	// setup exit-handler
 	pthread_cleanup_push((void *) &thread_exithandler, (void *) args);
@@ -172,7 +171,11 @@ static void connection_thread(void * th_args) {
 				// this is needed so that the thread checks exit_requested without blocking on recvfrom
 				usleep(200);
 				continue;
-			} else {
+			} else if (errno == 104) {
+				printf("client %d (%s): reset connection\n", args->clientnr, inet_ntoa(args->client_addr.sin_addr));
+				break;
+			}
+			else {
 				sys_warn("Server Fault : RECVFROM");
 				pthread_exit((void *) pthread_self());
 			}
@@ -186,21 +189,24 @@ static void connection_thread(void * th_args) {
 		// parse first line of request
 		// strtok_r because we parse whole lines and tokenize again inside each line -> operating on same buffer
 		lineBUF = strtok_r(recvBUF, delimeter, &saveptr1);
-		request_flags = check_http_request(lineBUF, &pathBUF, REQUEST_PATH_BUFSIZE, &saveptr2);
+		request_flags = check_http_request(lineBUF, &pathptr, &saveptr2);
 
-		// print sth like: "client 1: GET requested-path"
-		print_client_msgtype(request_flags, pathBUF, args->clientnr, inet_ntoa(args->client_addr.sin_addr));
+		// print sth like: "client 1: GET /requested-path"
+		print_client_msgtype(request_flags, pathptr, args->clientnr, inet_ntoa(args->client_addr.sin_addr));
 
 		// if no valid http request drop packet buffer and continue;
 		if (request_flags < 1 || request_flags & INVALID_REQUEST) continue;
 
 		while (1){ // parse the other lines until (and not including) line of only \r\n
-			memset(lineBUF, 0, sizeof(*lineBUF));
+			memset(lineBUF, 0, strlen(lineBUF)+1);
 			if ((lineBUF = strtok_r(NULL, delimeter, &saveptr1)) == NULL) break;
 			//printf("%s\n", lineBUF);
 		}
+
+		// send 501 not implemented as response
+		send_501(args->connfd);
+
 		// reset recieve buffer and continue
-		memset(pathBUF, 0, REQUEST_PATH_BUFSIZE);
 		memset(recvBUF, 0, BUFSIZE-1); 
 	}
 
@@ -218,4 +224,7 @@ static void thread_exithandler(void * th_args) {
 		snprintf(buf, sizeof(buf), "close (tid %ld)", pthread_self());
 		sys_warn(buf);
 	}
+	free(th_args); // copy of thread args made at thread startup
+	// detach self so thread does not have to be joined to prevent mem leakage
+	pthread_detach(pthread_self()); 
 }

@@ -1,5 +1,6 @@
 #include <string.h>
 #include <stdio.h>
+#include <arpa/inet.h>
 
 enum request_flags {
     INVALID_REQUEST = 1,
@@ -29,16 +30,14 @@ enum http_status_codes {
 } http_status_code ;
 
 // parses one line token by token setting flags
-// writes requested path into pathBUF
+// sets path_token_ptr to null-terminated string containing the requested path (might become NULL)
 // saveptr needed by strtok_r
 // returns -1 on error else http_request enum with flags set
-int check_http_request(char* lineBUF, char** pathBUF, size_t pathBUFsize, char** saveptr){
+int check_http_request(char* lineBUF, char** path_token_ptr, char** saveptr){
 
     if (lineBUF == NULL) return -1;
-    if (*pathBUF == NULL) return -1;
 
     int flags = 0;
-    size_t pathlen;
 
     // first token is everything before first space
     char* request_type = strtok_r(lineBUF, " ", saveptr);
@@ -48,25 +47,29 @@ int check_http_request(char* lineBUF, char** pathBUF, size_t pathBUFsize, char**
     else flags |= INVALID_REQUEST; // no valid http1.0 request
 
     // skip spaces and forward to / (delim space to include / in str)
-    char* path = strtok_r(NULL, " ", saveptr);
-    if (path == NULL) return flags | INVALID_REQUEST;
-
-    pathlen = strlen(path);
-    if (pathlen <= 1) flags |= EMPTY_PATH;
-    else if (pathlen+1 > pathBUFsize){
-        // prevent buffer overflow
-        printf("[WARNING] path buffer too small for requested path\n");
-        return -1;
-    }
-    *pathBUF = path; // write path in provided buffer
+    // set provided ptr to start of path
+    *path_token_ptr = strtok_r(NULL, " ", saveptr);
+    if (*path_token_ptr == NULL) return flags | INVALID_REQUEST;
+    if (strlen(*path_token_ptr) <= 1) flags |= EMPTY_PATH;
 
     // version token i.e "HTTP/1.0"
     char* version = strtok_r(NULL, " ", saveptr);
     if (version == NULL) return flags | INVALID_REQUEST;
+    
     if (strcmp(version, "HTTP/1.0") == 0) return flags;
     else return flags | UNSUPPORTED_VERSION;
 }
 
+void send_501(const int connfd){
+    if (connfd <= 0) return;
+    const char* msg = "HTTP/1.0 501 Not Implemented\r\nContent-type: text/html\r\n\r\n<html><body><b>501</b>Operation not supported</body></html>\r\n";
+    if (send(connfd, msg, strlen(msg), 0) < 0){
+        sys_warn("[WARNING] error sending message\n");
+    }
+}
+
+// print message based on flags
+// i.e "client 1: GET /requested/path"
 void print_client_msgtype(const int request_flags, const char* path, const int client_nr, const char* addr_str){
     if (request_flags < 0){
 		printf("client %d (%s): error parsing request\n", client_nr, addr_str);
