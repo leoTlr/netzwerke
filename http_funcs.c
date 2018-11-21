@@ -60,9 +60,41 @@ int check_http_request(char* lineBUF, char** path_token_ptr, char** saveptr){
     else return flags | UNSUPPORTED_VERSION;
 }
 
+// using given socket, send 501 - not implemented
 void send_501(const int connfd){
     if (connfd <= 0) return;
-    const char* msg = "HTTP/1.0 501 Not Implemented\r\nContent-type: text/html\r\n\r\n<html><body><b>501</b>Operation not supported</body></html>\r\n";
+
+    char msg[1024] =                "HTTP/1.0 501 Not Implemented\r\n";
+    const char* content_type =      "Content-type: text/html\r\n";
+    const char* content_length =    "Content-length: 63\r\n";
+    const char* crlf =              "\r\n";
+    const char* entity_body =       "<html><body><b>501</b> - Operation not supported</body></html>\r\n";
+
+    strcat(msg, content_type);
+    strcat(msg, content_length);
+    strcat(msg, crlf);
+    strcat(msg, entity_body);
+
+    if (send(connfd, msg, strlen(msg), 0) < 0){
+        sys_warn("[WARNING] error sending message\n");
+    }
+}
+
+// using given socket, send 400 Bad Request
+void send_400(const int connfd){
+    if (connfd <= 0) return;
+
+    char msg[1024] =                "HTTP/1.0 400 Bad Request\r\n";
+    const char* content_type =      "Content-type: text/html\r\n";
+    const char* content_length =    "Content-length: 52\r\n";
+    const char* crlf =              "\r\n";
+    const char* entity_body =       "<html><body><b>400</b> - Bad Request </body></html>\r\n";
+
+    strcat(msg, content_type);
+    strcat(msg, content_length);
+    strcat(msg, crlf);
+    strcat(msg, entity_body);
+
     if (send(connfd, msg, strlen(msg), 0) < 0){
         sys_warn("[WARNING] error sending message\n");
     }

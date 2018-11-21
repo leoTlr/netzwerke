@@ -194,14 +194,29 @@ static void connection_thread(void * th_args) {
 		// print sth like: "client 1: GET /requested-path"
 		print_client_msgtype(request_flags, pathptr, args->clientnr, inet_ntoa(args->client_addr.sin_addr));
 
-		// if no valid http request drop packet buffer and continue;
-		if (request_flags < 1 || request_flags & INVALID_REQUEST) continue;
+		// if no valid http request drop packet buffer, send "400-Bad request" and continue;
+		if (request_flags < 1 || request_flags & INVALID_REQUEST) {
+			send_400(args->connfd);
+			continue;
+		}
 
+		// POST-request not supported, send "501, not implemented"
+		if (request_flags & HTTP_POST) {
+			send_501(args->connfd);
+			continue;
+		}
+
+		// react on GET
+		if ((request_flags & HTTP_GET) && !(request_flags & EMPTY_PATH)) {
+			
+		}
+		
+		/* not implemented atm
 		while (1){ // parse the other lines until (and not including) line of only \r\n
 			memset(lineBUF, 0, strlen(lineBUF)+1);
 			if ((lineBUF = strtok_r(NULL, delimeter, &saveptr1)) == NULL) break;
 			//printf("%s\n", lineBUF);
-		}
+		} */
 
 		// send 501 not implemented as response
 		send_501(args->connfd);
