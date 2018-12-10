@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <unistd.h> // close()
 #include <string.h> // strerror()
+#include <sys/stat.h> // stat
 
 // Called with wrong arguments.
 void usage(char *argv0){
@@ -38,4 +39,11 @@ void sys_err(char *msg, int exitCode, int sockfd){
 // print warn msg with errno
 void sys_warn(char* msg){
 	fprintf(stderr, "[WARNING] %s\n\t%s\n", msg, strerror(errno));
+}
+
+// gathering filesize 
+int file_size(char filepath[]){
+	struct stat properties;
+	stat(filepath, &properties);
+	return (int)properties.st_size;
 }

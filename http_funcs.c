@@ -66,11 +66,13 @@ void send_501(const int connfd){
 
     char msg[1024] =                "HTTP/1.0 501 Not Implemented\r\n";
     const char* content_type =      "Content-type: text/html\r\n";
+    const char* server =            "Server: MicroWWW Team 06\r\n";
     const char* content_length =    "Content-length: 63\r\n";
     const char* crlf =              "\r\n";
     const char* entity_body =       "<html><body><b>501</b> - Operation not supported</body></html>\r\n";
 
     strcat(msg, content_type);
+    strcat(msg, server);
     strcat(msg, content_length);
     strcat(msg, crlf);
     strcat(msg, entity_body);
@@ -86,14 +88,63 @@ void send_400(const int connfd){
 
     char msg[1024] =                "HTTP/1.0 400 Bad Request\r\n";
     const char* content_type =      "Content-type: text/html\r\n";
+    const char* server =            "Server: MicroWWW Team 06\r\n";
     const char* content_length =    "Content-length: 52\r\n";
     const char* crlf =              "\r\n";
     const char* entity_body =       "<html><body><b>400</b> - Bad Request </body></html>\r\n";
 
     strcat(msg, content_type);
+    strcat(msg, server);
     strcat(msg, content_length);
     strcat(msg, crlf);
     strcat(msg, entity_body);
+
+    if (send(connfd, msg, strlen(msg), 0) < 0){
+        sys_warn("[WARNING] error sending message\n");
+    }
+}
+
+// using given socket, send 404 Not Found 
+void send_404(const int connfd) {
+    if (connfd <= 0) return;
+
+    char msg[1024] =                "HTTP/1.0 404 Not Found\r\n";
+    const char* content_type =      "Content-type: text/html\r\n";
+    const char* server =            "Server: MicroWWW Team 06\r\n";
+    const char* content_length =    "Content-length: 50\r\n";
+    const char* crlf =              "\r\n";
+    const char* entity_body =       "<html><body><b>404</b> - Not Found </body></html>\r\n";
+
+    strcat(msg, content_type);
+    strcat(msg, server);
+    strcat(msg, content_length);
+    strcat(msg, crlf);
+    strcat(msg, entity_body);
+
+    if (send(connfd, msg, strlen(msg), 0) < 0){
+        sys_warn("[WARNING] error sending message\n");
+    }
+}
+
+// using given socket, send 200 OK & file length
+void send_200(const int connfd, int fileLEN) {
+    if (connfd <= 0) return;
+    
+    // file length is needed for correct data transfer
+    char fileBUF[128];
+    snprintf(fileBUF, sizeof(fileBUF), "%i%s", fileLEN, "\r\n");
+
+    char msg[1024] =                "HTTP/1.0 200 OK\r\n";
+    const char* content_type =      "Content-type: text/html\r\n";
+    const char* content_length =    "Content-length:";
+    const char* server =            "Server: MicroWWW Team 06\r\n";
+    const char* crlf =              "\r\n";
+
+    strcat(msg, content_type);
+    strcat(msg, content_length);
+    strcat(msg, fileBUF);
+    strcat(msg, server);
+    strcat(msg, crlf);
 
     if (send(connfd, msg, strlen(msg), 0) < 0){
         sys_warn("[WARNING] error sending message\n");
@@ -119,3 +170,4 @@ void print_client_msgtype(const int request_flags, const char* path, const int c
         printf("client %d (%s): HEAD %s\n", client_nr, addr_str, path);
     }
 }
+
