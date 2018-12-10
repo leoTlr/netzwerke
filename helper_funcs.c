@@ -41,7 +41,7 @@ void sys_warn(char* msg){
 	fprintf(stderr, "[WARNING] %s\n\t%s\n", msg, strerror(errno));
 }
 
-// gathering filesize
+// gathering filesize 
 int file_size(char filepath[]){
 	struct stat properties;
 	stat(filepath, &properties);
