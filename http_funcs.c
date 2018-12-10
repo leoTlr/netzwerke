@@ -126,7 +126,7 @@ void send_404(const int connfd) {
     }
 }
 
-// using given socket, send 200 OK
+// using given socket, send 200 OK & file length
 void send_200(const int connfd, int fileLEN) {
     if (connfd <= 0) return;
     
