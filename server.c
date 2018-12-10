@@ -12,6 +12,7 @@
 #include "helper_funcs.c"
 #include "http_funcs.c"
 
+#define FILE_ROOT "/var/microwww/"
 #define MAX_CONNECTIONS 10
 #define MAX_THREADS MAX_CONNECTIONS
 #define LISTEN_BACKLOG 100 // max connection queue length (see man listen)
@@ -213,7 +214,7 @@ static void connection_thread(void * th_args) {
 		// react on GET
 		if ((request_flags & HTTP_GET) && !(request_flags & EMPTY_PATH)) {
 			// add /var/microwww/ to the path
-			snprintf(filepath, sizeof(filepath), "%s%s", "/var/microwww/", pathptr);
+			snprintf(filepath, sizeof(filepath), "%s%s", FILE_ROOT, pathptr);
 			// check if file exists/ can be read, if not send 404 
 			fd = open(filepath, O_RDONLY);
 			if (fd < 0) {
