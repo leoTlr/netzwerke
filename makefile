@@ -25,3 +25,7 @@ helper_funcs.$(OBJ) :
 clean :
 	$(del) server.$(OBJ)
 	$(del) server$(EXE)
+	$(del) http_funcs.$(OBJ)
+	$(del) helper_funcs.$(OBJ)
+
+
