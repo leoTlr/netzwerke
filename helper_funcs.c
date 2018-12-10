@@ -5,6 +5,9 @@
 #include <string.h> // strerror()
 #include <sys/stat.h> // stat
 
+#ifndef HELPER_FUNCS_C
+#define HELPER_FUNCS_C
+
 // Called with wrong arguments.
 void usage(char *argv0){
 	printf("usage : %s portnumber\n", argv0);
@@ -47,3 +50,5 @@ int file_size(char filepath[]){
 	stat(filepath, &properties);
 	return (int)properties.st_size;
 }
+
+#endif //HELPER_FUNCS_C

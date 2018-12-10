@@ -8,22 +8,24 @@ OBJ=o
 del=rm
 EXE=
 
-all : server client
+all : server
 
-server : server.$(OBJ)
+server : server.$(OBJ) http_funcs.$(OBJ) helper_funcs.$(OBJ)
 	$(LINK) $(LFLAGS) server.$(OBJ) $(LIBS)
 
-server.$(OBJ) : server.c
+server.$(OBJ) : server.c http_funcs.c helper_funcs.c
 	$(CC) -c server.c $(CFLAGS)
 
-client : client.$(OBJ)
-	$(LINK) $(LFLAGS) client.$(OBJ) $(LIBS)
+http_funcs.$(OBJ) :
+	$(CC) -c http_funcs.c $(CFLAGS)
 
-client.$(OBJ) : client.c
-	$(CC) -c client.c $(CFLAGS)
+helper_funcs.$(OBJ) :
+	$(CC) -c helper_funcs.c $(CFLAGS)
 
 clean :
-	$(del) client.$(OBJ)
 	$(del) server.$(OBJ)
 	$(del) server$(EXE)
-	$(del) client$(EXE)
+	$(del) http_funcs.$(OBJ)
+	$(del) helper_funcs.$(OBJ)
+
+

@@ -2,6 +2,8 @@
 #include <stdio.h>
 #include <arpa/inet.h>
 
+#include "helper_funcs.c"
+
 enum request_flags {
     INVALID_REQUEST = 1,
     UNSUPPORTED_VERSION = 2,
