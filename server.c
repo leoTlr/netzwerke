@@ -6,6 +6,8 @@
 #include <signal.h>
 #include <pthread.h>
 #include <time.h>
+#include <sys/sendfile.h>
+#include <fcntl.h>
 
 #include "helper_funcs.c"
 #include "http_funcs.c"
@@ -149,12 +151,14 @@ static void connection_thread(void * th_args) {
 	// initialize buffers and variables needed
 	char recvBUF[BUFSIZE];
 	memset(recvBUF, 0, BUFSIZE);
-	int recvBUFlen = 0;
+	int recvBUFlen = 0, fileLEN = 0, fd;
+	off_t offset = 0;
 
 	char* lineBUF, *saveptr1, *saveptr2; // saveptrs needed for strtok_r;
 	const char delimeter[3] = "\r\n"; // each line of request ends with carriage return + line feed
 	
 	char* pathptr; // path in request
+	char filepath[128];
 	int request_flags = 0; // flags set during check_http_request()
 
 	// setup exit-handler
@@ -208,7 +212,25 @@ static void connection_thread(void * th_args) {
 
 		// react on GET
 		if ((request_flags & HTTP_GET) && !(request_flags & EMPTY_PATH)) {
-			
+			// add /var/microwww/ to the path
+			snprintf(filepath, sizeof(filepath), "%s%s", "/var/microwww/", pathptr);
+			// check if file exists/ can be read, if not send 404 
+			fd = open(filepath, O_RDONLY);
+			if (fd < 0) {
+				send_404(args->connfd);
+				continue;
+			}
+			else {
+				// gathering filesize
+				fileLEN = file_size(filepath);
+				// sending OK 
+				send_200(args->connfd, fileLEN);
+				// note: sendfile is not in a posix standart and only works on linux. programm is not portable 
+				 if ((sendfile(args->connfd, fd , &offset, fileLEN)) < 0) {
+				 	sys_err("Server Fault: SENDFILE", -5, server_sockfd);
+				 }
+				//if((send()))
+			}
 		}
 		
 		/* not implemented atm
@@ -219,7 +241,7 @@ static void connection_thread(void * th_args) {
 		} */
 
 		// send 501 not implemented as response
-		send_501(args->connfd);
+		//send_501(args->connfd);
 
 		// reset recieve buffer and continue
 		memset(recvBUF, 0, BUFSIZE-1); 
