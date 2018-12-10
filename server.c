@@ -7,7 +7,6 @@
 #include <pthread.h>
 #include <time.h>
 #include <sys/sendfile.h>
-//#include <sys/types.h>
 #include <fcntl.h>
 
 #include "helper_funcs.c"
