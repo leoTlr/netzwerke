@@ -240,13 +240,17 @@ static void connection_thread(void * th_args) {
 				// sending OK 
 				send_200(args.connfd, fileLEN, sendBUF, sizeof(sendBUF));
 				// note: sendfile is not in a posix standart and only works on linux. programm is not portable 
-				 if ((sendfile(args.connfd, fd , &offset, fileLEN)) < 0) {
+				 if ((sendfile(args.connfd, fd , &offset, fileLEN)) < 0) 
 				 	sys_err("Server Fault: SENDFILE", -5, server_sockfd);
-				 }
-			}
-			// close opened file
-			if ((close(fd)) < 0) {
-				sys_err("SERVER Fault: CLOSE", -6, server_sockfd);
+				
+				// close opened file
+				if ((close(fd)) < 0) 
+					sys_err("SERVER Fault: CLOSE", -6, server_sockfd);
+				// reset buffer and free memory
+				memset(filepathBUF, 0, FILEPATH_BUF);
+				free(filepathBUF);
+
+				
 			}
 
 		}
