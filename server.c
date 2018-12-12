@@ -246,11 +246,6 @@ static void connection_thread(void * th_args) {
 				// close opened file
 				if ((close(fd)) < 0) 
 					sys_err("SERVER Fault: CLOSE", -6, server_sockfd);
-				// reset buffer and free memory
-				memset(filepathBUF, 0, FILEPATH_BUF);
-				free(filepathBUF);
-
-				
 			}
 
 		}
@@ -268,6 +263,7 @@ static void connection_thread(void * th_args) {
 		// reset buffers and continue
 		memset(recvBUF, 0, BUFSIZE); 
 		memset(sendBUF, 0, BUFSIZE);
+		memset(filepathBUF, 0, FILEPATH_BUF);
 	}
 
 	// remove exit_handler (and run it)
