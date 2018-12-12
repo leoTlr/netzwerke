@@ -63,67 +63,79 @@ int check_http_request(char* lineBUF, char** path_token_ptr, char** saveptr){
 }
 
 // using given socket, send 501 - not implemented
-void send_501(const int connfd){
+void send_501(const int connfd, char* sendBUF, const size_t buflen){
     if (connfd <= 0) return;
+    if (sendBUF == NULL || buflen == 0) return;
 
-    char msg[1024] =                "HTTP/1.0 501 Not Implemented\r\n";
+    memset(sendBUF, 0, buflen);
+
+    const char* answer_line =       "HTTP/1.0 501 Not Implemented\r\n";
     const char* content_type =      "Content-type: text/html\r\n";
     const char* server =            "Server: MicroWWW Team 06\r\n";
     const char* content_length =    "Content-length: 63\r\n";
     const char* crlf =              "\r\n";
     const char* entity_body =       "<html><body><b>501</b> - Operation not supported</body></html>\r\n";
 
-    strcat(msg, content_type);
-    strcat(msg, server);
-    strcat(msg, content_length);
-    strcat(msg, crlf);
-    strcat(msg, entity_body);
+    strcat(sendBUF, answer_line);
+    strcat(sendBUF, content_type);
+    strcat(sendBUF, server);
+    strcat(sendBUF, content_length);
+    strcat(sendBUF, crlf);
+    strcat(sendBUF, entity_body);
 
-    if (send(connfd, msg, strlen(msg), 0) < 0){
+    if (send(connfd, sendBUF, strlen(sendBUF), 0) < 0){
         sys_warn("[WARNING] error sending message\n");
     }
 }
 
 // using given socket, send 400 Bad Request
-void send_400(const int connfd){
+void send_400(const int connfd, char* sendBUF, const size_t buflen){
     if (connfd <= 0) return;
+    if (sendBUF == NULL || buflen == 0) return;
 
-    char msg[1024] =                "HTTP/1.0 400 Bad Request\r\n";
+    memset(sendBUF, 0, buflen);
+
+    const char* answer_line =       "HTTP/1.0 400 Bad Request\r\n";
     const char* content_type =      "Content-type: text/html\r\n";
     const char* server =            "Server: MicroWWW Team 06\r\n";
     const char* content_length =    "Content-length: 52\r\n";
     const char* crlf =              "\r\n";
     const char* entity_body =       "<html><body><b>400</b> - Bad Request </body></html>\r\n";
 
-    strcat(msg, content_type);
-    strcat(msg, server);
-    strcat(msg, content_length);
-    strcat(msg, crlf);
-    strcat(msg, entity_body);
+    strcat(sendBUF, answer_line);
+    strcat(sendBUF, content_type);
+    strcat(sendBUF, server);
+    strcat(sendBUF, content_length);
+    strcat(sendBUF, crlf);
+    strcat(sendBUF, entity_body);
 
-    if (send(connfd, msg, strlen(msg), 0) < 0){
+    if (send(connfd, sendBUF, strlen(sendBUF), 0) < 0){
         sys_warn("[WARNING] error sending message\n");
     }
 }
 
 // using given socket, send 404 Not Found 
-void send_404(const int connfd) {
+void send_404(const int connfd, char* sendBUF, const size_t buflen) {
     if (connfd <= 0) return;
+    if (sendBUF == NULL || buflen == 0) return;
 
-    char msg[1024] =                "HTTP/1.0 404 Not Found\r\n";
+    memset(sendBUF, 0, buflen);
+
+    const char* answer_line =       "HTTP/1.0 404 Not Found\r\n";
     const char* content_type =      "Content-type: text/html\r\n";
     const char* server =            "Server: MicroWWW Team 06\r\n";
     const char* content_length =    "Content-length: 50\r\n";
     const char* crlf =              "\r\n";
     const char* entity_body =       "<html><body><b>404</b> - Not Found </body></html>\r\n";
 
-    strcat(msg, content_type);
-    strcat(msg, server);
-    strcat(msg, content_length);
-    strcat(msg, crlf);
-    strcat(msg, entity_body);
+    strcat(sendBUF, answer_line);
+    strcat(sendBUF, content_type);
+    strcat(sendBUF, server);
+    strcat(sendBUF, content_length);
+    strcat(sendBUF, crlf);
+    strcat(sendBUF, entity_body);
 
-    if (send(connfd, msg, strlen(msg), 0) < 0){
+    if (send(connfd, sendBUF, strlen(sendBUF), 0) < 0){
         sys_warn("[WARNING] error sending message\n");
     }
 }
