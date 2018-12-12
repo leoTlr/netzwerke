@@ -13,6 +13,7 @@
 #include "http_funcs.c"
 
 #define FILE_ROOT "/var/microwww/"
+#define FILEPATH_BUF 256
 #define MAX_CONNECTIONS 10
 #define MAX_THREADS MAX_CONNECTIONS
 #define LISTEN_BACKLOG 100 // max connection queue length (see man listen)
@@ -162,6 +163,7 @@ static void connection_thread(void * th_args) {
 	// initialize buffers and variables needed (big buffers on heap to prevent stack overflow)
 	char* recvBUF = calloc(BUFSIZE, sizeof(char));
 	char* sendBUF = calloc(BUFSIZE, sizeof(char));
+	char* filepathBUF = calloc(FILEPATH_BUF, sizeof(char));
 	int msglen = 0, fileLEN = 0, fd;
 	off_t offset = 0;
 
@@ -169,7 +171,6 @@ static void connection_thread(void * th_args) {
 	const char delimeter[3] = "\r\n"; // each line of request ends with carriage return + line feed
 	
 	char* pathptr; // path in request
-	char filepath[128];
 	int request_flags = 0; // flags set during check_http_request()
 
 	// setup exit-handler
@@ -225,26 +226,26 @@ static void connection_thread(void * th_args) {
 		// react on GET
 		if ((request_flags & HTTP_GET) && !(request_flags & EMPTY_PATH)) {
 			// add /var/microwww/ to the path
-			snprintf(filepath, sizeof(filepath), "%s%s", FILE_ROOT, pathptr);
+			strcat(filepathBUF, FILE_ROOT);
+			strcat(filepathBUF, pathptr);
 			// check if file exists/ can be read, if not send 404 
-			fd = open(filepath, O_RDONLY);
+			fd = open(filepathBUF, O_RDONLY);
 			if (fd < 0) {
 				send_404(args.connfd, sendBUF, sizeof(sendBUF));
 				continue;
 			}
 			else {
 				// gathering filesize
-				fileLEN = file_size(filepath);
+				fileLEN = file_size(filepathBUF);
 				// sending OK 
 				send_200(args.connfd, fileLEN, sendBUF, sizeof(sendBUF));
 				// note: sendfile is not in a posix standart and only works on linux. programm is not portable 
-				 if ((sendfile(args.connfd, fd , &offset, fileLEN)) < 0) {
+				 if ((sendfile(args.connfd, fd , &offset, fileLEN)) < 0) 
 				 	sys_err("Server Fault: SENDFILE", -5, server_sockfd);
-				 }
-			}
-			// close opened file
-			if ((close(fd)) < 0) {
-				sys_err("Server Fault: CLOSE", -6, server_sockfd);
+				
+				// close opened file
+				if ((close(fd)) < 0) 
+					sys_err("SERVER Fault: CLOSE", -6, server_sockfd);
 			}
 
 		}
@@ -262,6 +263,7 @@ static void connection_thread(void * th_args) {
 		// reset buffers and continue
 		memset(recvBUF, 0, BUFSIZE); 
 		memset(sendBUF, 0, BUFSIZE);
+		memset(filepathBUF, 0, FILEPATH_BUF);
 	}
 
 	// remove exit_handler (and run it)
