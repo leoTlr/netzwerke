@@ -25,6 +25,12 @@ typedef struct thread_args_t {
 	socklen_t addrlen;
 } thread_args_t;
 
+typedef struct thread_exit_args_t {
+	int connfd;
+	char* recvBUF;
+	char* sendBUF;
+} thread_exit_args_t;
+
 // thread body and exit handler
 static void connection_thread(void *);
 static void thread_exithandler(void *);
@@ -144,15 +150,19 @@ int main(int argc, char **argv){
 
 static void connection_thread(void * th_args) {
 
-	// unsure: values in th_args could get overwritten in main thread
-	// make local copy of args
-	thread_args_t* args = (thread_args_t*)malloc(sizeof(thread_args_t));
-	memcpy(args, (thread_args_t*) th_args, sizeof(thread_args_t));
+	// *th_args will get out of scope when new connection arrives in main
+	// -> make local copy of args
+	thread_args_t* args_ptr = (thread_args_t*) th_args;
+	thread_args_t args;
+	args.connfd = args_ptr->connfd;
+	args.clientnr = args_ptr->clientnr;
+	args.client_addr = args_ptr->client_addr;
+	args.addrlen = args_ptr->addrlen;
 
-	// initialize buffers and variables needed
-	char recvBUF[BUFSIZE];
-	memset(recvBUF, 0, BUFSIZE);
-	int recvBUFlen = 0, fileLEN = 0, fd;
+	// initialize buffers and variables needed (big buffers on heap to prevent stack overflow)
+	char* recvBUF = calloc(BUFSIZE, sizeof(char));
+	char* sendBUF = calloc(BUFSIZE, sizeof(char));
+	int msglen = 0, fileLEN = 0, fd;
 	off_t offset = 0;
 
 	char* lineBUF, *saveptr1, *saveptr2; // saveptrs needed for strtok_r;
@@ -163,21 +173,22 @@ static void connection_thread(void * th_args) {
 	int request_flags = 0; // flags set during check_http_request()
 
 	// setup exit-handler
-	pthread_cleanup_push((void *) &thread_exithandler, (void *) args);
+	thread_exit_args_t exit_args = {args.connfd, recvBUF, sendBUF};
+	pthread_cleanup_push((void *) &thread_exithandler, (void *) &exit_args);
 
-	printf("Connection accepted from: %s (client %d)\n", inet_ntoa(args->client_addr.sin_addr), args->clientnr);
+	printf("Connection accepted from: %s (client %d)\n", inet_ntoa(args.client_addr.sin_addr), args.clientnr);
 	while (!exit_requested) {
 		
 		// use MSG_DONTWAIT to prevent blocking on this call (sets EAGAIN or EWOULDBLOCK if no data)
-		recvBUFlen = recvfrom(args->connfd, &recvBUF, BUFSIZE-1, MSG_DONTWAIT, (struct sockaddr *) &args->client_addr, &args->addrlen);
-		if (recvBUFlen < 0){
+		msglen = recvfrom(args.connfd, recvBUF, BUFSIZE-1, MSG_DONTWAIT, (struct sockaddr *) &args.client_addr, &args.addrlen);
+		if (msglen < 0){
 			if (errno == EAGAIN || errno == EWOULDBLOCK){
 				// in case of non-blocking socket and no data arrived -> sleep and loop again
 				// this is needed so that the thread checks exit_requested without blocking on recvfrom
 				usleep(200);
 				continue;
 			} else if (errno == 104) {
-				printf("client %d (%s): reset connection\n", args->clientnr, inet_ntoa(args->client_addr.sin_addr));
+				printf("client %d (%s): reset connection\n", args.clientnr, inet_ntoa(args.client_addr.sin_addr));
 				break;
 			}
 			else {
@@ -186,8 +197,8 @@ static void connection_thread(void * th_args) {
 			}
 		}
 
-		if (recvBUFlen == 0){
-			printf("client %d (%s): closed connection\n", args->clientnr, inet_ntoa(args->client_addr.sin_addr));
+		if (msglen == 0){
+			printf("client %d (%s): closed connection\n", args.clientnr, inet_ntoa(args.client_addr.sin_addr));
 			break;
 		}
 
@@ -197,17 +208,17 @@ static void connection_thread(void * th_args) {
 		request_flags = check_http_request(lineBUF, &pathptr, &saveptr2);
 
 		// print sth like: "client 1: GET /requested-path"
-		print_client_msgtype(request_flags, pathptr, args->clientnr, inet_ntoa(args->client_addr.sin_addr));
+		print_client_msgtype(request_flags, pathptr, args.clientnr, inet_ntoa(args.client_addr.sin_addr));
 
 		// if no valid http request drop packet buffer, send "400-Bad request" and continue;
 		if (request_flags < 1 || request_flags & INVALID_REQUEST) {
-			send_400(args->connfd);
+			send_400(args.connfd, sendBUF, sizeof(sendBUF));
 			continue;
 		}
 
 		// POST-request not supported, send "501, not implemented"
 		if (request_flags & HTTP_POST) {
-			send_501(args->connfd);
+			send_501(args.connfd, sendBUF, sizeof(sendBUF));
 			continue;
 		}
 
@@ -218,16 +229,16 @@ static void connection_thread(void * th_args) {
 			// check if file exists/ can be read, if not send 404 
 			fd = open(filepath, O_RDONLY);
 			if (fd < 0) {
-				send_404(args->connfd);
+				send_404(args.connfd, sendBUF, sizeof(sendBUF));
 				continue;
 			}
 			else {
 				// gathering filesize
 				fileLEN = file_size(filepath);
 				// sending OK 
-				send_200(args->connfd, fileLEN);
+				send_200(args.connfd, fileLEN, sendBUF, sizeof(sendBUF));
 				// note: sendfile is not in a posix standart and only works on linux. programm is not portable 
-				 if ((sendfile(args->connfd, fd , &offset, fileLEN)) < 0) {
+				 if ((sendfile(args.connfd, fd , &offset, fileLEN)) < 0) {
 				 	sys_err("Server Fault: SENDFILE", -5, server_sockfd);
 				 }
 				//if((send()))
@@ -244,25 +255,34 @@ static void connection_thread(void * th_args) {
 		// send 501 not implemented as response
 		//send_501(args->connfd);
 
-		// reset recieve buffer and continue
-		memset(recvBUF, 0, BUFSIZE-1); 
+		// reset buffers and continue
+		memset(recvBUF, 0, BUFSIZE); 
+		memset(sendBUF, 0, BUFSIZE);
 	}
 
 	// remove exit_handler (and run it)
+	// exit handler frees buffers and closes socket
 	pthread_cleanup_pop(1);
 	pthread_exit((void *)pthread_self());
 }
 
-static void thread_exithandler(void * th_args) {
-	// close socket and decrement thread counter
-	thread_args_t *args = (thread_args_t *) th_args;
-	thread_counter--;
+// close socket, free buffers, decrement thread_counter and detach thread
+static void thread_exithandler(void * exit_args) {
+	thread_exit_args_t *args = (thread_exit_args_t *) exit_args;
+
+	// close socket
 	if (close(args->connfd) < 0){
 		char buf[50];
 		snprintf(buf, sizeof(buf), "close (tid %ld)", pthread_self());
 		sys_warn(buf);
 	}
-	free(th_args); // copy of thread args made at thread startup
+
+	// free buffers
+	free(args->recvBUF);
+	free(args->sendBUF);
+
+	thread_counter--;
+
 	// detach self so thread does not have to be joined to prevent mem leakage
 	pthread_detach(pthread_self()); 
 }
