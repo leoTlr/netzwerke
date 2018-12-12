@@ -244,7 +244,7 @@ static void connection_thread(void * th_args) {
 			}
 			// close opened file
 			if ((close(fd)) < 0) {
-				sys_err("SERVER Fault: CLOSE", -6, server_sockfd);
+				sys_err("Server Fault: CLOSE", -6, server_sockfd);
 			}
 
 		}
