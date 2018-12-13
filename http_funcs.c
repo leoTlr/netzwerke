@@ -31,11 +31,12 @@ enum http_status_codes {
     SERVICE_UNAVAILABLE = 503,
 } http_status_code ;
 
-// parses one line token by token setting flags
-// sets path_token_ptr to null-terminated string containing the requested path (might become NULL)
-// saveptr needed by strtok_r
-// returns -1 on error else http_request enum with flags set
-int check_http_request(char* lineBUF, char** path_token_ptr, char** saveptr){
+/*  Parses one line token by token setting flags.
+    Sets path_token_ptr to null-terminated string containing the requested path (might become NULL).
+    Will set INVALID_REQUEST if path too big for buffer.
+    Saveptr needed by strtok_r
+    returns -1 on error else http_request flags set   */
+int check_http_request(char* lineBUF, char** path_token_ptr, const size_t pathlen_max, char** saveptr){
 
     if (lineBUF == NULL) return -1;
 
@@ -52,6 +53,10 @@ int check_http_request(char* lineBUF, char** path_token_ptr, char** saveptr){
     // set provided ptr to start of path
     *path_token_ptr = strtok_r(NULL, " ", saveptr);
     if (*path_token_ptr == NULL) return flags | INVALID_REQUEST;
+    if (strlen(*path_token_ptr) > pathlen_max) {
+        *path_token_ptr = NULL;
+        return flags | INVALID_REQUEST; 
+    }
     if (strlen(*path_token_ptr) <= 1) flags |= EMPTY_PATH;
 
     // version token i.e "HTTP/1.0"
