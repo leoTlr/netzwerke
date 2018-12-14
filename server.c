@@ -14,7 +14,6 @@
 
 #define FILE_ROOT "/var/microwww/"
 #define FILEPATH_BUF 256
-#define MAX_REQUEST_PATHLEN (FILEPATH_BUF-strlen(FILE_ROOT)-1)
 #define MAX_CONNECTIONS 10
 #define MAX_THREADS MAX_CONNECTIONS
 #define LISTEN_BACKLOG 100 // max connection queue length (see man listen)
@@ -31,6 +30,7 @@ typedef struct thread_exit_args_t {
 	int connfd;
 	char* recvBUF;
 	char* sendBUF;
+	char* filepathBUF;
 } thread_exit_args_t;
 
 // thread body and exit handler
@@ -175,7 +175,7 @@ static void connection_thread(void * th_args) {
 	int request_flags = 0; // flags set during check_http_request()
 
 	// setup exit-handler
-	thread_exit_args_t exit_args = {args.connfd, recvBUF, sendBUF};
+	thread_exit_args_t exit_args = {args.connfd, recvBUF, sendBUF, filepathBUF};
 	pthread_cleanup_push((void *) &thread_exithandler, (void *) &exit_args);
 
 	printf("Connection accepted from: %s (client %d)\n", inet_ntoa(args.client_addr.sin_addr), args.clientnr);
@@ -207,7 +207,7 @@ static void connection_thread(void * th_args) {
 		// parse first line of request
 		// strtok_r because we parse whole lines and tokenize again inside each line -> operating on same buffer
 		lineBUF = strtok_r(recvBUF, delimeter, &saveptr1);
-		request_flags = check_http_request(lineBUF, &pathptr, MAX_REQUEST_PATHLEN, &saveptr2);
+		request_flags = check_http_request(lineBUF, &pathptr, &saveptr2);
 
 		// print sth like: "client 1: GET /requested-path"
 		print_client_msgtype(request_flags, pathptr, args.clientnr, inet_ntoa(args.client_addr.sin_addr));
@@ -287,6 +287,7 @@ static void thread_exithandler(void * exit_args) {
 	// free buffers
 	free(args->recvBUF);
 	free(args->sendBUF);
+	free(args->filepathBUF);
 
 	thread_counter--;
 
