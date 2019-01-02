@@ -141,12 +141,6 @@ int main(int argc, char **argv){
 	close(server_sockfd);
 	free(tidBUF);
 
-	// unblock SIGINT
-	struct sigaction new_sa;
-	new_sa.sa_handler = SIG_DFL;
-	new_sa.sa_flags = 0;
-	sigaction(SIGINT, &new_sa, &sa);
-
 	printf("Cleanup finished\n");
 	return EXIT_SUCCESS;
 }
@@ -155,12 +149,7 @@ static void connection_thread(void * th_args) {
 
 	// *th_args will get out of scope when new connection arrives in main
 	// -> make local copy of args
-	thread_args_t* args_ptr = (thread_args_t*) th_args;
-	thread_args_t args;
-	args.connfd = args_ptr->connfd;
-	args.clientnr = args_ptr->clientnr;
-	args.client_addr = args_ptr->client_addr;
-	args.addrlen = args_ptr->addrlen;
+	thread_args_t args = *((thread_args_t*) th_args);
 
 	// initialize buffers and variables needed (big buffers on heap to prevent stack overflow)
 	char* recvBUF = calloc(BUFSIZE, sizeof(char));
@@ -258,9 +247,6 @@ static void connection_thread(void * th_args) {
 			if ((lineBUF = strtok_r(NULL, delimeter, &saveptr1)) == NULL) break;
 			//printf("%s\n", lineBUF);
 		} */
-
-		// send 501 not implemented as response
-		//send_501(args->connfd);
 
 		// reset buffers and continue
 		memset(recvBUF, 0, BUFSIZE); 
