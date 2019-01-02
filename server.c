@@ -8,6 +8,7 @@
 #include <time.h>
 #include <sys/sendfile.h>
 #include <fcntl.h>
+#include <sys/sem.h>
 
 #include "helper_funcs.c"
 #include "http_funcs.c"
@@ -19,6 +20,8 @@
 #define MAX_THREADS MAX_CONNECTIONS
 #define LISTEN_BACKLOG 100 // max connection queue length (see man listen)
 #define BUFSIZE 2048
+#define LOCK 1 // for semaphore
+#define UNLOCK -1
 
 typedef struct thread_args_t {
 	int connfd;
@@ -38,11 +41,15 @@ typedef struct thread_exit_args_t {
 static void connection_thread(void *);
 static void thread_exithandler(void *);
 
-// global vars needed for signalhandler
+// lock/unlock semaphore
+int sem_operation();
+
+// global vars needed for signalhandler, semaphore or needed inside threads and main
 int server_sockfd = -1, client_sockfd;
 volatile sig_atomic_t exit_requested = 0; // volatile sig_atomic_t to prevent concurrent access
 volatile sig_atomic_t thread_counter = 0; // to keep track of # running threads
-struct sigaction sa;
+static struct sigaction sa;
+static int copysem_id; 
 
 // let program finish normally if recieving SIGINT
 void sighandler(){
@@ -58,19 +65,19 @@ void sighandler(){
 	// set flag for loops to stop
 	// main loop and thread loops are conditioned to this flag and will stop soon
 	exit_requested = 1;
-	// problem: main loop or thread loops could be stuck on a blocking call
+	// warning: main loop or thread loops could be stuck on a blocking call
+	// -> dont use blocking calls
 }
 
 int main(int argc, char **argv){
 
-	pthread_t* tidBUF = malloc(sizeof(pthread_t));
+	// Check for right number of arguments
+	if (argc < 2) usage(argv[0]);
 
-	// other declarations
-	int client_id_counter = 1;
-
-	// declarations for sockets
-	struct sockaddr_in server_addr, client_addr; // getting casted to sockaddr on usage
+	struct sockaddr_in server_addr, client_addr;
 	socklen_t addrlen = sizeof(struct sockaddr_in);
+	pthread_t* tidBUF = malloc(sizeof(pthread_t));
+	int client_id_counter = 1;
 
 	// register SIGINT and SIGTERM-handler
 	sigemptyset(&sa.sa_mask);
@@ -78,10 +85,20 @@ int main(int argc, char **argv){
     sa.sa_flags = 0;
     if ((sigaction(SIGINT, &sa, NULL)) < 0){
 		sys_warn("Could not register SIGINT-handler");
+		exit(EXIT_FAILURE);
     }
 
-	// Check for right number of arguments
-	if (argc < 2) usage(argv[0]);
+	// semaphore to prevent arguments for threads getting out of scope before thread made a local copy
+    if ((copysem_id=semget(IPC_PRIVATE, 1, 0660)) < 0){
+        sys_warn("Could not register semaphore");
+        exit(EXIT_FAILURE);
+    } else{ 
+        // init with 1 (unlocked)
+        if (semctl(copysem_id, 0, SETVAL, 1) < 0){
+            sys_warn("Could not initialize semaphore");
+            exit(EXIT_FAILURE);
+        }
+	}
 
 	// initialize TCP/IP socket
 	if ((server_sockfd = socket(AF_INET, SOCK_STREAM, 0)) == -1){
@@ -106,10 +123,12 @@ int main(int argc, char **argv){
 
 	if (bind(server_sockfd, (struct sockaddr *) &server_addr, addrlen) == -1){
 		sys_err("Server Fault : BIND", -2, server_sockfd);
+		exit(EXIT_FAILURE);
 	}
 
 	if (listen(server_sockfd, LISTEN_BACKLOG) != 0){
 		sys_err("Server Fault : LISTEN", -3, server_sockfd);
+		exit(EXIT_FAILURE);
 	}
 
 	printf("Waiting for incoming connections...\n");
@@ -123,16 +142,25 @@ int main(int argc, char **argv){
 		
 		// wait for incoming TCP connection (connect() call from somewhere else)
 		if ((client_sockfd = accept(server_sockfd, (struct sockaddr *) &client_addr, &addrlen)) < 0){ // blocking call
-			if (errno == 4){ // Interrupted system call
-				break; // happens on SIGINT, in this case just exit the loop for cleanup
-			} else {
-				sys_err("Server Fault : ACCEPT", -4, server_sockfd);
+			if (errno != 4) {
+				// (interrupted syscall) happens when program is shutting down like intended
+				// dont print warning in this case
+				sys_warn("Server Fault : ACCEPT");
 			}
+			// raise SIGINT calling the handler letting threads end gracefully
+			raise(SIGINT);
+			break;
 		}
 
 		// prepare args and create separate thread to handle connection
+		// do this locking the semaphore (will get unlocked when thread made a local copy of its args)
+		if (sem_operation(LOCK) < 0) { // possibly blocking call
+			sys_warn("Server Fault : sem_operation");
+			raise(SIGINT);
+			break;
+		} 
 		const thread_args_t th_args = {client_sockfd, client_id_counter++, client_addr, addrlen};
-		pthread_create(tidBUF, NULL, (void *) &connection_thread, (void *) &th_args);
+		pthread_create(tidBUF, NULL, (const void *) &connection_thread, (void *) &th_args);
 		thread_counter++;		
 	}
 
@@ -148,8 +176,15 @@ int main(int argc, char **argv){
 static void connection_thread(void * th_args) {
 
 	// *th_args will get out of scope when new connection arrives in main
-	// -> make local copy of args
+	// -> make local copy of args and unlock the semaphore locked in main loop
 	thread_args_t args = *((thread_args_t*) th_args);
+	if (sem_operation(UNLOCK) < 0) {
+		// not possible for program to continue running if unlocking failed
+		// raise SIGINT to let other threads end gracefully and end self
+		sys_warn("Server Fault : sem_operation");
+		raise(SIGINT);
+		pthread_exit((void*)pthread_self());
+	}
 
 	// initialize buffers and variables needed (big buffers on heap to prevent stack overflow)
 	char* recvBUF = calloc(BUFSIZE, sizeof(char));
@@ -280,4 +315,18 @@ static void thread_exithandler(void * exit_args) {
 
 	// detach self so thread does not have to be joined to prevent mem leakage
 	pthread_detach(pthread_self()); 
+}
+
+// helper-function for locking/unlocking the semaphre
+int sem_operation(int op){
+
+    static struct sembuf sbuf;
+    sbuf.sem_op = op;
+    sbuf.sem_flg = SEM_UNDO;
+
+    if (semop(copysem_id, &sbuf, 1) < 0){
+        perror("semop");
+        return -1;
+    }
+    return 1;
 }
