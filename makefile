@@ -1,31 +1,33 @@
-CC=cc
-LINK=cc
-CFLAGS= -g -Wall -Wextra
-LFLAGS= -o $@
-LIBDIR=
-LIBS=-lpthread
-OBJ=o
-del=rm
-EXE=
+# universal makefile from https://stackoverflow.com/a/28663974/9986282
 
-all : server
+appname := server
 
-server : server.$(OBJ) http_funcs.$(OBJ) helper_funcs.$(OBJ)
-	$(LINK) $(LFLAGS) server.$(OBJ) $(LIBS)
+CC := gcc
+CCFLAGS := -Wall -Wextra -g
+LDFLAGS :=
+LDLIBS := -lpthread
 
-server.$(OBJ) : server.c http_funcs.c helper_funcs.c
-	$(CC) -c server.c $(CFLAGS)
+SRCDIR := ./src
 
-http_funcs.$(OBJ) :
-	$(CC) -c http_funcs.c $(CFLAGS)
+srcext := c
+srcfiles := $(shell find $(SRCDIR) -name "*.$(srcext)")
+objects  := $(patsubst %.$(srcext), %.o, $(srcfiles))
 
-helper_funcs.$(OBJ) :
-	$(CC) -c helper_funcs.c $(CFLAGS)
+all: $(appname)
 
-clean :
-	$(del) server.$(OBJ)
-	$(del) server$(EXE)
-	$(del) http_funcs.$(OBJ)
-	$(del) helper_funcs.$(OBJ)
+$(appname): $(objects)
+	$(CC) $(CCFLAGS) $(LDFLAGS) -o $(appname) $(objects) $(LDLIBS)
 
+depend: .depend
 
+.depend: $(srcfiles)
+	rm -f ./.depend
+	$(CC) $(CCFLAGS) -MM $^>>./.depend;
+
+clean:
+	rm -f $(objects) $(appname)
+
+#dist-clean: clean
+#	rm -f *~ .depend
+
+include .depend

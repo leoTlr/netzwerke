@@ -9,9 +9,11 @@
 #include <sys/sendfile.h>
 #include <fcntl.h>
 #include <sys/sem.h>
+#include <errno.h>
 
-#include "helper_funcs.c"
-#include "http_funcs.c"
+#include "helper_funcs.h"
+#include "http_funcs.h"
+#include "tidstack.h"
 
 #define FILE_ROOT "/var/microwww/"
 #define FILEPATH_BUF 256
@@ -22,15 +24,16 @@
 #define BUFSIZE 2048
 #define LOCK 1 // for semaphore
 #define UNLOCK -1
+#define MAX_SHUTDOWN_WAIT_TIME 4000 // time in ms to wait for threads to finish during server shutdown
 
-typedef struct thread_args_t {
+typedef struct {
 	int connfd;
 	int clientnr;
 	struct sockaddr_in client_addr;
 	socklen_t addrlen;
 } thread_args_t;
 
-typedef struct thread_exit_args_t {
+typedef struct {
 	int connfd;
 	char* recvBUF;
 	char* sendBUF;
@@ -44,21 +47,22 @@ static void thread_exithandler(void *);
 // lock/unlock semaphore
 int sem_operation();
 
-// global vars needed for signalhandler, semaphore or needed inside threads and main
+// global vars needed for semaphore or needed inside threads and main
 int server_sockfd = -1, client_sockfd;
 volatile sig_atomic_t exit_requested = 0; // volatile sig_atomic_t to prevent concurrent access
 volatile sig_atomic_t thread_counter = 0; // to keep track of # running threads
-static struct sigaction sa;
 static int copysem_id; 
+tidstack_t tid_stack;
 
 // let program finish normally if recieving SIGINT
 void sighandler(){
 
 	// block SIGINT during cleanup
-	struct sigaction new_sa;
-	new_sa.sa_handler = SIG_IGN;
-	new_sa.sa_flags = 0;
-	sigaction(SIGINT, &new_sa, &sa);
+	struct sigaction sa = {0};
+	sigemptyset(&sa.sa_mask);
+	sa.sa_handler = SIG_IGN;
+	sa.sa_flags = 0;
+	sigaction(SIGINT, &sa, NULL);
 
 	printf("\n"); // not signal safe but worth a try to make output look better
 
@@ -76,10 +80,13 @@ int main(int argc, char **argv){
 
 	struct sockaddr_in server_addr, client_addr;
 	socklen_t addrlen = sizeof(struct sockaddr_in);
-	pthread_t* tidBUF = malloc(sizeof(pthread_t));
 	int client_id_counter = 1;
+	pthread_t tid;
+
+	tidstack_init(&tid_stack);
 
 	// register SIGINT and SIGTERM-handler
+	struct sigaction sa = {0};
 	sigemptyset(&sa.sa_mask);
     sa.sa_handler = &sighandler;
     sa.sa_flags = 0;
@@ -100,8 +107,8 @@ int main(int argc, char **argv){
         }
 	}
 
-	// initialize TCP/IP socket
-	if ((server_sockfd = socket(AF_INET, SOCK_STREAM, 0)) == -1){
+	// initialize TCP/IP socket (nonblocking to prevent waiting for accept() when recieving SIGINT)
+	if ((server_sockfd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0)) == -1){
 		sys_err("Server Fault : SOCKET", -1, server_sockfd);
 	}
 
@@ -136,20 +143,22 @@ int main(int argc, char **argv){
 
 		// wait with accepting connections if too many active
 		if (thread_counter >= MAX_THREADS){
-			usleep(200);
+			usleep(100);
 			continue;
 		}
 		
 		// wait for incoming TCP connection (connect() call from somewhere else)
-		if ((client_sockfd = accept(server_sockfd, (struct sockaddr *) &client_addr, &addrlen)) < 0){ // blocking call
-			if (errno != 4) {
-				// (interrupted syscall) happens when program is shutting down like intended
-				// dont print warning in this case
+		if ((client_sockfd = accept(server_sockfd, (struct sockaddr *) &client_addr, &addrlen)) < 0){
+			if (errno == EAGAIN || errno == EWOULDBLOCK) {
+				// happens if no connection ready because socket is nonblocking
+				usleep(10);
+				continue;
+			} else {
+				// raise SIGINT calling the handler letting threads end gracefully
 				sys_warn("Server Fault : ACCEPT");
+				raise(SIGINT);
+				break;
 			}
-			// raise SIGINT calling the handler letting threads end gracefully
-			raise(SIGINT);
-			break;
 		}
 
 		// prepare args and create separate thread to handle connection
@@ -160,17 +169,40 @@ int main(int argc, char **argv){
 			break;
 		} 
 		const thread_args_t th_args = {client_sockfd, client_id_counter++, client_addr, addrlen};
-		pthread_create(tidBUF, NULL, (const void *) &connection_thread, (void *) &th_args);
-		thread_counter++;		
+		pthread_create(&tid, NULL, (const void *) &connection_thread, (void *) &th_args);
+		thread_counter++;
+		tidstack_push(&tid_stack, tid);
 	}
 
 	// cleanup -----------------------------------------------
 	printf("Shutting down... ");
 	close(server_sockfd);
-	free(tidBUF);
+
+	/*
+	// wait for threads to finish (cant join() because threads detach themselves in exithandler)
+	int slept_ms = 0;
+	while (slept_ms < MAX_SHUTDOWN_WAIT_TIME) {
+		if (thread_counter > 0) {
+			usleep(10);
+			slept_ms += 10;
+			continue;
+		} else break;
+	} */
+	while (1) {
+		tid = tidstack_pop(&tid_stack);
+		if (tid == 0)
+			break;
+		pthread_join(tid, NULL);
+		printf("joined one\n");
+	}
+
+	tidstack_destroy(&tid_stack);
+
+	semctl(copysem_id, 0, IPC_RMID);
 
 	printf("Cleanup finished\n");
-	return EXIT_SUCCESS;
+	pthread_exit(NULL);
+	//return EXIT_SUCCESS;
 }
 
 static void connection_thread(void * th_args) {
@@ -185,6 +217,8 @@ static void connection_thread(void * th_args) {
 		raise(SIGINT);
 		pthread_exit((void*)pthread_self());
 	}
+
+	//pthread_detach(pthread_self()); 
 
 	// initialize buffers and variables needed (big buffers on heap to prevent stack overflow)
 	char* recvBUF = calloc(BUFSIZE, sizeof(char));
@@ -214,7 +248,7 @@ static void connection_thread(void * th_args) {
 				// this is needed so that the thread checks exit_requested without blocking on recvfrom
 				usleep(200);
 				continue;
-			} else if (errno == 104) {
+			} else if (errno == ECONNRESET) {
 				printf("client %d (%s): reset connection\n", args.clientnr, inet_ntoa(args.client_addr.sin_addr));
 				break;
 			}
@@ -297,24 +331,24 @@ static void connection_thread(void * th_args) {
 
 // close socket, free buffers, decrement thread_counter and detach thread
 static void thread_exithandler(void * exit_args) {
-	thread_exit_args_t *args = (thread_exit_args_t *) exit_args;
+	thread_exit_args_t args = *((thread_exit_args_t *) exit_args);
 
 	// close socket
-	if (close(args->connfd) < 0){
+	if (close(args.connfd) < 0){
 		char buf[50];
 		snprintf(buf, sizeof(buf), "close (tid %ld)", pthread_self());
 		sys_warn(buf);
 	}
 
 	// free buffers
-	free(args->recvBUF);
-	free(args->sendBUF);
-	free(args->filepathBUF);
+	free(args.recvBUF);
+	free(args.sendBUF);
+	free(args.filepathBUF);
 
 	thread_counter--;
 
 	// detach self so thread does not have to be joined to prevent mem leakage
-	pthread_detach(pthread_self()); 
+	//pthread_detach(pthread_self()); 
 }
 
 // helper-function for locking/unlocking the semaphre

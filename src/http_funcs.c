@@ -2,34 +2,8 @@
 #include <stdio.h>
 #include <arpa/inet.h>
 
-#include "helper_funcs.c"
-
-enum request_flags {
-    INVALID_REQUEST = 1,
-    UNSUPPORTED_VERSION = 2,
-    HTTP_GET = 4,
-    HTTP_POST = 8,
-    HTTP_HEAD = 16,
-    EMPTY_PATH = 32,
-} request_flag ;
-
-enum http_status_codes {
-    OK = 200,
-    CREATED = 201,
-    ACCEPTED = 202,
-    NO_CONTENT = 204,
-    MOVED_PERMANENTLY = 301,
-    MOVED_TEMPORARILY = 302,
-    NOT_MODIFIED = 304,
-    BAD_REQUEST = 400,
-    UNAUTHORIZED = 401,
-    FORBIDDEN = 403,
-    NOT_FOUND = 404,
-    INTERNAL_SERVER_ERROR = 500,
-    NOT_IMPLEMENTED = 501,
-    BAD_GATEWAY = 502,
-    SERVICE_UNAVAILABLE = 503,
-} http_status_code ;
+#include "http_funcs.h"
+#include "helper_funcs.h"
 
 /*  Parses one line token by token setting flags.
     Sets path_token_ptr to null-terminated string containing the requested path (might become NULL).
