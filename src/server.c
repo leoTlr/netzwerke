@@ -24,7 +24,6 @@
 #define BUFSIZE 2048
 #define LOCK 1 // for semaphore
 #define UNLOCK -1
-#define MAX_SHUTDOWN_WAIT_TIME 4000 // time in ms to wait for threads to finish during server shutdown
 
 typedef struct {
 	int connfd;
@@ -47,12 +46,13 @@ static void thread_exithandler(void *);
 // lock/unlock semaphore
 int sem_operation();
 
+// WARNING: not thread-safe -> only use in main thread (or protect with semaphore)
 // global vars needed for semaphore or needed inside threads and main
 int server_sockfd = -1, client_sockfd;
-volatile sig_atomic_t exit_requested = 0; // volatile sig_atomic_t to prevent concurrent access
-volatile sig_atomic_t thread_counter = 0; // to keep track of # running threads
 static int copysem_id; 
-tidstack_t tid_stack;
+tidstack_t tid_stack; // store thread id's to be able to join them (NOT thread safe)
+// volatile sig_atomic_t is safe to use in sighandlers but is NOT thread-safe (on write)
+volatile sig_atomic_t exit_requested = 0; // only reads are thread-safe
 
 // let program finish normally if recieving SIGINT
 void sighandler(){
@@ -85,7 +85,7 @@ int main(int argc, char **argv){
 
 	tidstack_init(&tid_stack);
 
-	// register SIGINT and SIGTERM-handler
+	// register SIGINT-handler
 	struct sigaction sa = {0};
 	sigemptyset(&sa.sa_mask);
     sa.sa_handler = &sighandler;
@@ -142,7 +142,7 @@ int main(int argc, char **argv){
 	while (!exit_requested) {
 
 		// wait with accepting connections if too many active
-		if (thread_counter >= MAX_THREADS){
+		if (tid_stack.nr_elems >= MAX_THREADS){
 			usleep(100);
 			continue;
 		}
@@ -161,8 +161,9 @@ int main(int argc, char **argv){
 			}
 		}
 
-		// prepare args and create separate thread to handle connection
-		// do this locking the semaphore (will get unlocked when thread made a local copy of its args)
+		/* 	prepare args and create separate thread to handle connection
+		 	lock semaphore to make sure the thread can create a local copy of his args and can safely push his tid on tidstack
+			(will get unlocked inside thread)	*/
 		if (sem_operation(LOCK) < 0) { // possibly blocking call
 			sys_warn("Server Fault : sem_operation");
 			raise(SIGINT);
@@ -170,46 +171,36 @@ int main(int argc, char **argv){
 		} 
 		const thread_args_t th_args = {client_sockfd, client_id_counter++, client_addr, addrlen};
 		pthread_create(&tid, NULL, (const void *) &connection_thread, (void *) &th_args);
-		thread_counter++;
-		tidstack_push(&tid_stack, tid);
 	}
 
 	// cleanup -----------------------------------------------
 	printf("Shutting down... ");
 	close(server_sockfd);
 
-	/*
-	// wait for threads to finish (cant join() because threads detach themselves in exithandler)
-	int slept_ms = 0;
-	while (slept_ms < MAX_SHUTDOWN_WAIT_TIME) {
-		if (thread_counter > 0) {
-			usleep(10);
-			slept_ms += 10;
-			continue;
-		} else break;
-	} */
+	// wait for all threads to finish
 	while (1) {
 		tid = tidstack_pop(&tid_stack);
 		if (tid == 0)
 			break;
 		pthread_join(tid, NULL);
-		printf("joined one\n");
 	}
 
 	tidstack_destroy(&tid_stack);
-
 	semctl(copysem_id, 0, IPC_RMID);
 
 	printf("Cleanup finished\n");
 	pthread_exit(NULL);
-	//return EXIT_SUCCESS;
 }
 
-static void connection_thread(void * th_args) {
+void connection_thread(void * th_args) {
 
 	// *th_args will get out of scope when new connection arrives in main
 	// -> make local copy of args and unlock the semaphore locked in main loop
 	thread_args_t args = *((thread_args_t*) th_args);
+
+	// still with locked semaphore
+	tidstack_push(&tid_stack, pthread_self());
+
 	if (sem_operation(UNLOCK) < 0) {
 		// not possible for program to continue running if unlocking failed
 		// raise SIGINT to let other threads end gracefully and end self
@@ -217,8 +208,6 @@ static void connection_thread(void * th_args) {
 		raise(SIGINT);
 		pthread_exit((void*)pthread_self());
 	}
-
-	//pthread_detach(pthread_self()); 
 
 	// initialize buffers and variables needed (big buffers on heap to prevent stack overflow)
 	char* recvBUF = calloc(BUFSIZE, sizeof(char));
@@ -344,11 +333,6 @@ static void thread_exithandler(void * exit_args) {
 	free(args.recvBUF);
 	free(args.sendBUF);
 	free(args.filepathBUF);
-
-	thread_counter--;
-
-	// detach self so thread does not have to be joined to prevent mem leakage
-	//pthread_detach(pthread_self()); 
 }
 
 // helper-function for locking/unlocking the semaphre
