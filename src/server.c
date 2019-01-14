@@ -57,12 +57,13 @@ volatile sig_atomic_t exit_requested = 0; // only reads are thread-safe
 // let program finish normally if recieving SIGINT
 void sighandler(){
 
-	// block SIGINT during cleanup
+	// block SIGINT and SIGTERM during cleanup
 	struct sigaction sa = {0};
 	sigemptyset(&sa.sa_mask);
 	sa.sa_handler = SIG_IGN;
 	sa.sa_flags = 0;
 	sigaction(SIGINT, &sa, NULL);
+	sigaction(SIGTERM, &sa, NULL);
 
 	printf("\n"); // not signal safe but worth a try to make output look better
 
