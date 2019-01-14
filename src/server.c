@@ -94,6 +94,10 @@ int main(int argc, char **argv){
 		sys_warn("Could not register SIGINT-handler");
 		exit(EXIT_FAILURE);
     }
+	if ((sigaction(SIGTERM, &sa, NULL)) < 0){
+		sys_warn("Could not register SIGTERM-handler");
+		exit(EXIT_FAILURE);
+    }
 
 	// semaphore to prevent arguments for threads getting out of scope before thread made a local copy
     if ((copysem_id=semget(IPC_PRIVATE, 1, 0660)) < 0){
