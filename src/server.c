@@ -49,10 +49,14 @@ int sem_operation();
 // WARNING: not thread-safe -> only use in main thread (or protect with semaphore)
 // global vars needed for semaphore or needed inside threads and main
 int server_sockfd = -1, client_sockfd;
-static int copysem_id; 
-tidstack_t tid_stack; // store thread id's to be able to join them (NOT thread safe)
+tidstack_t join_stack; // store thread id's to be able to join them (NOT thread safe)
 // volatile sig_atomic_t is safe to use in sighandlers but is NOT thread-safe (on write)
 volatile sig_atomic_t exit_requested = 0; // only reads are thread-safe
+volatile int thread_counter = 0; // WARNING always use mutex on writes to be thread-safe
+// mutex for counter as it always will be the same thread to lock and unlock
+static pthread_mutex_t threadcount_mutex = PTHREAD_MUTEX_INITIALIZER;
+// semaphore because it gets locked and unlocked in different threads
+static int copysem_id; 
 
 // let program finish normally if recieving SIGINT
 void sighandler(){
@@ -84,7 +88,7 @@ int main(int argc, char **argv){
 	int client_id_counter = 1;
 	pthread_t tid;
 
-	tidstack_init(&tid_stack);
+	tidstack_init(&join_stack);
 
 	// register SIGINT-handler
 	struct sigaction sa = {0};
@@ -147,7 +151,7 @@ int main(int argc, char **argv){
 	while (!exit_requested) {
 
 		// wait with accepting connections if too many active
-		if (tid_stack.nr_elems >= MAX_THREADS){
+		if (thread_counter >= MAX_THREADS){
 			usleep(100);
 			continue;
 		}
@@ -176,6 +180,15 @@ int main(int argc, char **argv){
 		} 
 		const thread_args_t th_args = {client_sockfd, client_id_counter++, client_addr, addrlen};
 		pthread_create(&tid, NULL, (const void *) &connection_thread, (void *) &th_args);
+
+		// safely increment thread counter
+		if (pthread_mutex_lock(&threadcount_mutex) != 0) {
+			sys_warn("mainthread error locking counter mutex");
+			raise(SIGINT);
+		} else {
+			thread_counter++;
+			pthread_mutex_unlock(&threadcount_mutex);
+		}
 	}
 
 	// cleanup -----------------------------------------------
@@ -183,14 +196,15 @@ int main(int argc, char **argv){
 	close(server_sockfd);
 
 	// wait for all threads to finish
+	// no need to use a semaphore/mutex here because this only gets called in main thread
 	while (1) {
-		tid = tidstack_pop(&tid_stack);
+		tid = tidstack_pop(&join_stack);
 		if (tid == 0)
 			break;
 		pthread_join(tid, NULL);
 	}
 
-	tidstack_destroy(&tid_stack);
+	tidstack_destroy(&join_stack);
 	semctl(copysem_id, 0, IPC_RMID);
 
 	printf("Cleanup finished\n");
@@ -204,7 +218,7 @@ void connection_thread(void * th_args) {
 	thread_args_t args = *((thread_args_t*) th_args);
 
 	// still with locked semaphore
-	tidstack_push(&tid_stack, pthread_self());
+	tidstack_push(&join_stack, pthread_self());
 
 	if (sem_operation(UNLOCK) < 0) {
 		// not possible for program to continue running if unlocking failed
@@ -338,6 +352,15 @@ static void thread_exithandler(void * exit_args) {
 	free(args.recvBUF);
 	free(args.sendBUF);
 	free(args.filepathBUF);
+
+	// safely decrement thread counter
+	if (pthread_mutex_lock(&threadcount_mutex) != 0) {
+		sys_warn("thread_exithandler error locking counter mutex");
+		raise(SIGINT);
+	} else {
+		thread_counter--;
+		pthread_mutex_unlock(&threadcount_mutex);
+	}
 }
 
 // helper-function for locking/unlocking the semaphre
