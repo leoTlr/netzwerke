@@ -58,8 +58,8 @@ static pthread_mutex_t threadcount_mutex = PTHREAD_MUTEX_INITIALIZER;
 // semaphore because it gets locked and unlocked in different threads
 static int copysem_id; 
 
-// let program finish normally if recieving SIGINT
-void sighandler(){
+// let program finish normally if recieving SIGINT or SIGTERM
+void sighandler(int signo){
 
 	// block SIGINT and SIGTERM during cleanup
 	struct sigaction sa = {0};
@@ -69,7 +69,13 @@ void sighandler(){
 	sigaction(SIGINT, &sa, NULL);
 	sigaction(SIGTERM, &sa, NULL);
 
-	printf("\n"); // not signal safe but worth a try to make output look better
+	// not signal safe but worth a try for logging reasons
+	if (signo == SIGINT)
+		printf("SIGINT recieved, exiting\n");
+	else if (signo == SIGTERM)
+		printf("SIGTERM recieved, exiting\n");
+	else
+		printf("Signal (%d) recieved, exiting\n", signo);
 
 	// set flag for loops to stop
 	// main loop and thread loops are conditioned to this flag and will stop soon
@@ -81,7 +87,7 @@ void sighandler(){
 int main(int argc, char **argv){
 
 	// Check for right number of arguments
-	if (argc < 2) usage(argv[0]);
+	if (argc != 2) usage(argv[0]);
 
 	struct sockaddr_in server_addr, client_addr;
 	socklen_t addrlen = sizeof(struct sockaddr_in);
@@ -95,31 +101,22 @@ int main(int argc, char **argv){
 	sigemptyset(&sa.sa_mask);
     sa.sa_handler = &sighandler;
     sa.sa_flags = 0;
-    if ((sigaction(SIGINT, &sa, NULL)) < 0){
-		sys_warn("Could not register SIGINT-handler");
-		exit(EXIT_FAILURE);
-    }
-	if ((sigaction(SIGTERM, &sa, NULL)) < 0){
-		sys_warn("Could not register SIGTERM-handler");
-		exit(EXIT_FAILURE);
-    }
+    if ((sigaction(SIGINT, &sa, NULL)) < 0)
+		sys_exit("Could not register SIGINT-handler", NULL);
+	if ((sigaction(SIGTERM, &sa, NULL)) < 0)
+		sys_exit("Could not register SIGTERM-handler", NULL);
 
 	// semaphore to prevent arguments for threads getting out of scope before thread made a local copy
-    if ((copysem_id=semget(IPC_PRIVATE, 1, 0660)) < 0){
-        sys_warn("Could not register semaphore");
-        exit(EXIT_FAILURE);
-    } else{ 
+    if ((copysem_id=semget(IPC_PRIVATE, 1, 0660)) < 0)
+        sys_exit("Could not register semaphore", NULL);
+    else
         // init with 1 (unlocked)
-        if (semctl(copysem_id, 0, SETVAL, 1) < 0){
-            sys_warn("Could not initialize semaphore");
-            exit(EXIT_FAILURE);
-        }
-	}
+        if (semctl(copysem_id, 0, SETVAL, 1) < 0)
+            sys_exit("Could not initialize semaphore", NULL);
 
 	// initialize TCP/IP socket (nonblocking to prevent waiting for accept() when recieving SIGINT)
-	if ((server_sockfd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0)) == -1){
-		sys_err("Server Fault : SOCKET", -1, server_sockfd);
-	}
+	if ((server_sockfd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0)) == -1)
+		sys_exit("Server Fault : SOCKET", &server_sockfd);
 
 	// Set params so that we receive IPv4 packets from anyone on the specified port
 	memset(&server_addr, 0, addrlen);
@@ -137,15 +134,11 @@ int main(int argc, char **argv){
 	int reuse = 1;
 	setsockopt(server_sockfd, SOL_SOCKET, SO_REUSEADDR, (const char *) &reuse, sizeof(reuse));
 
-	if (bind(server_sockfd, (struct sockaddr *) &server_addr, addrlen) == -1){
-		sys_err("Server Fault : BIND", -2, server_sockfd);
-		exit(EXIT_FAILURE);
-	}
+	if (bind(server_sockfd, (struct sockaddr *) &server_addr, addrlen) == -1)
+		sys_exit("Server Fault : BIND", &server_sockfd);
 
-	if (listen(server_sockfd, LISTEN_BACKLOG) != 0){
-		sys_err("Server Fault : LISTEN", -3, server_sockfd);
-		exit(EXIT_FAILURE);
-	}
+	if (listen(server_sockfd, LISTEN_BACKLOG) != 0)
+		sys_exit("Server Fault : LISTEN", &server_sockfd);
 
 	printf("Waiting for incoming connections...\n");
 	while (!exit_requested) {
@@ -164,8 +157,7 @@ int main(int argc, char **argv){
 				continue;
 			} else {
 				// raise SIGINT calling the handler letting threads end gracefully
-				sys_warn("Server Fault : ACCEPT");
-				raise(SIGINT);
+				sys_raise("Server Fault : ACCEPT", &server_sockfd);
 				break;
 			}
 		}
@@ -174,17 +166,16 @@ int main(int argc, char **argv){
 		 	lock semaphore to make sure the thread can create a local copy of his args and can safely push his tid on tidstack
 			(will get unlocked inside thread)	*/
 		if (sem_operation(LOCK) < 0) { // possibly blocking call
-			sys_warn("Server Fault : sem_operation");
-			raise(SIGINT);
+			sys_raise("Server Fault : sem_operation", &server_sockfd);
 			break;
 		} 
+
 		const thread_args_t th_args = {client_sockfd, client_id_counter++, client_addr, addrlen};
 		pthread_create(&tid, NULL, (const void *) &connection_thread, (void *) &th_args);
 
 		// safely increment thread counter
 		if (pthread_mutex_lock(&threadcount_mutex) != 0) {
-			sys_warn("mainthread error locking counter mutex");
-			raise(SIGINT);
+			sys_raise("mainthread error locking counter mutex", &server_sockfd);
 		} else {
 			thread_counter++;
 			pthread_mutex_unlock(&threadcount_mutex);
@@ -196,7 +187,7 @@ int main(int argc, char **argv){
 	close(server_sockfd);
 
 	// wait for all threads to finish
-	// no need to use a semaphore/mutex here because this only gets called in main thread
+	// no need to use a semaphore/mutex here because tidstack_pop() only gets called in main thread
 	while (1) {
 		tid = tidstack_pop(&join_stack);
 		if (tid == 0)
@@ -205,7 +196,8 @@ int main(int argc, char **argv){
 	}
 
 	tidstack_destroy(&join_stack);
-	semctl(copysem_id, 0, IPC_RMID);
+	if (semctl(copysem_id, 0, IPC_RMID) < 0)
+		sys_warn("Could not delete Semaphore ");
 
 	printf("Cleanup finished\n");
 	pthread_exit(NULL);
@@ -223,8 +215,7 @@ void connection_thread(void * th_args) {
 	if (sem_operation(UNLOCK) < 0) {
 		// not possible for program to continue running if unlocking failed
 		// raise SIGINT to let other threads end gracefully and end self
-		sys_warn("Server Fault : sem_operation");
-		raise(SIGINT);
+		sys_raise("Server Fault : sem_operation", NULL);
 		pthread_exit((void*)pthread_self());
 	}
 
@@ -261,12 +252,12 @@ void connection_thread(void * th_args) {
 				break;
 			}
 			else {
-				sys_warn("Server Fault : RECVFROM");
+				sys_raise("Server Fault : RECVFROM", NULL);
 				pthread_exit((void *) pthread_self());
 			}
 		}
 
-		if (msglen == 0){
+		if (msglen == 0){ // in case of implementing keep alive http option, dont break here and continue
 			printf("client %d (%s): closed connection\n", args.clientnr, inet_ntoa(args.client_addr.sin_addr));
 			break;
 		}
@@ -309,11 +300,11 @@ void connection_thread(void * th_args) {
 				send_200(args.connfd, fileLEN, sendBUF, sizeof(sendBUF));
 				// note: sendfile is not in a posix standart and only works on linux. programm is not portable 
 				 if ((sendfile(args.connfd, fd , &offset, fileLEN)) < 0) 
-				 	sys_err("Server Fault: SENDFILE", -5, server_sockfd);
+				 	sys_warn("Server Fault: SENDFILE");
 				
 				// close opened file
 				if ((close(fd)) < 0) 
-					sys_err("SERVER Fault: CLOSE", -6, server_sockfd);
+					sys_warn("Server Fault: CLOSE");
 			}
 
 		}
@@ -342,11 +333,8 @@ static void thread_exithandler(void * exit_args) {
 	thread_exit_args_t args = *((thread_exit_args_t *) exit_args);
 
 	// close socket
-	if (close(args.connfd) < 0){
-		char buf[50];
-		snprintf(buf, sizeof(buf), "close (tid %ld)", pthread_self());
-		sys_warn(buf);
-	}
+	if (close(args.connfd) < 0)
+		sys_warn("thread_exithandler : close");
 
 	// free buffers
 	free(args.recvBUF);
@@ -355,24 +343,22 @@ static void thread_exithandler(void * exit_args) {
 
 	// safely decrement thread counter
 	if (pthread_mutex_lock(&threadcount_mutex) != 0) {
-		sys_warn("thread_exithandler error locking counter mutex");
-		raise(SIGINT);
+		sys_raise("thread_exithandler error locking counter mutex", NULL);
 	} else {
 		thread_counter--;
 		pthread_mutex_unlock(&threadcount_mutex);
 	}
 }
 
-// helper-function for locking/unlocking the semaphre
-int sem_operation(int op){
+// helper-function for locking/unlocking the semaphre, return 0 on success or -1 if failure
+int sem_operation(int op) {
 
     static struct sembuf sbuf;
     sbuf.sem_op = op;
     sbuf.sem_flg = SEM_UNDO;
 
-    if (semop(copysem_id, &sbuf, 1) < 0){
-        perror("semop");
+    if (semop(copysem_id, &sbuf, 1) < 0)
         return -1;
-    }
-    return 1;
+
+    return 0;
 }

@@ -62,9 +62,8 @@ void send_501(const int connfd, char* sendBUF, const size_t buflen){
     strcat(sendBUF, crlf);
     strcat(sendBUF, entity_body);
 
-    if (send(connfd, sendBUF, strlen(sendBUF), 0) < 0){
-        sys_warn("[WARNING] error sending message\n");
-    }
+    if (send(connfd, sendBUF, strlen(sendBUF), 0) < 0)
+        sys_warn("send_501 : send()");
 }
 
 // using given socket, send 400 Bad Request
@@ -88,9 +87,8 @@ void send_400(const int connfd, char* sendBUF, const size_t buflen){
     strcat(sendBUF, crlf);
     strcat(sendBUF, entity_body);
 
-    if (send(connfd, sendBUF, strlen(sendBUF), 0) < 0){
-        sys_warn("[WARNING] error sending message\n");
-    }
+    if (send(connfd, sendBUF, strlen(sendBUF), 0) < 0)
+        sys_warn("send_400() : send()");
 }
 
 // using given socket, send 404 Not Found 
@@ -114,9 +112,8 @@ void send_404(const int connfd, char* sendBUF, const size_t buflen) {
     strcat(sendBUF, crlf);
     strcat(sendBUF, entity_body);
 
-    if (send(connfd, sendBUF, strlen(sendBUF), 0) < 0){
-        sys_warn("[WARNING] error sending message\n");
-    }
+    if (send(connfd, sendBUF, strlen(sendBUF), 0) < 0)
+        sys_warn("send_404() : send()");
 }
 
 // using given socket, send 200 OK & file length
@@ -143,9 +140,8 @@ void send_200(const int connfd, int fileLEN, char* sendBUF, const size_t buflen)
     strcat(sendBUF, server);
     strcat(sendBUF, crlf);
 
-    if (send(connfd, sendBUF, strlen(sendBUF), 0) < 0){
-        sys_warn("[WARNING] error sending message\n");
-    }
+    if (send(connfd, sendBUF, strlen(sendBUF), 0) < 0)
+        sys_warn("send_200() : send()");
 }
 
 // print message based on flags

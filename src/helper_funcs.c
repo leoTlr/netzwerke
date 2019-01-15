@@ -1,26 +1,33 @@
 #include <stdio.h> // stderr, stdin
 #include <errno.h> // errno
 #include <stdlib.h>
-#include <unistd.h> // close()
+#include <signal.h> // SIGINT
 #include <string.h> // strerror()
 #include <sys/stat.h> // stat
+#include <unistd.h> //close
 
 #include "helper_funcs.h"
 
 // Called with wrong arguments.
-void usage(char *argv0){
+void usage(char* argv0) {
 	printf("usage : %s portnumber\n", argv0);
 	exit(EXIT_SUCCESS);
 }
 
 // Something unexpected happened. Report error and terminate.
-void sys_err(char *msg, int exitCode, int sockfd){
-	fprintf(stderr, "%s\n\t%s\n", msg, strerror(errno));
+void sys_exit(char* msg, int* sockfd) {
+	fprintf(stderr, "[ERROR] %s\n\t%s\n", msg, strerror(errno));
+	if (sockfd)
+		close(*sockfd);
+	exit(EXIT_FAILURE);
+}
 
-	// close socket if existing
-	close(sockfd);
-	
-	exit(exitCode);
+// print errormsg and raise SIGINT
+void sys_raise(char* msg, int* sockfd) {
+	fprintf(stderr, "[ERROR] %s\n\t%s\n", msg, strerror(errno));
+	if (sockfd)
+		close(*sockfd);
+	raise(SIGINT);
 }
 
 // print warn msg with errno

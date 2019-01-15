@@ -5,7 +5,10 @@
 void usage(char *argv0);
 
 // Something unexpected happened. Report error and terminate.
-void sys_err(char *msg, int exitCode, int sockfd);
+void sys_exit(char* msg, int* sockfd);
+
+// print errormsg and raise SIGINT
+void sys_raise(char* msg, int* sockfd);
 
 // print warn msg with errno
 void sys_warn(char* msg);
